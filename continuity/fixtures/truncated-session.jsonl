@@ -1,0 +1,2 @@
+{"parentUuid":null,"isSidechain":false,"type":"user","uuid":"t1","timestamp":"2026-05-10T20:00:00.000Z","cwd":"/Volumes/chonk/projects/claude","sessionId":"99999999-0000-0000-0000-000000000000","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}
+{"parentUuid":"t1","isSidechain":false,"type":"assistant","uuid":"t2","timestamp":"2026-05-10T20:00:01.000Z","cwd":"/Volumes/chonk/projects/claude","sessionId":"99999999-0000-0000-0000-000000000000","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu","name":"Read","input":{"file_p
