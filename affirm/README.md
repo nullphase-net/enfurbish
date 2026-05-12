@@ -94,9 +94,10 @@ Absolute paths so the same project on different machines re-affirms independentl
 
 ## Installation
 
-Install via Claude Code's plugin mechanism.
-
-> TODO: pin the exact install command once the plugin is published.
+```
+/plugin marketplace add nullphase-net/enfurbish
+/plugin install affirm@enfurbish
+```
 
 Once installed:
 

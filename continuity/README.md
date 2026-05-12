@@ -110,9 +110,10 @@ The plugin never modifies CLAUDE.md without asking. CLAUDE.md is user-authored, 
 
 ## Installation
 
-Install via Claude Code's plugin mechanism.
-
-> TODO: pin the exact install command once the plugin is published.
+```
+/plugin marketplace add nullphase-net/enfurbish
+/plugin install continuity@enfurbish
+```
 
 Once installed:
 - `/wrap` and `/resume` appear as slash commands

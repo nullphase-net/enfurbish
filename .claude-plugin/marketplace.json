@@ -1,0 +1,24 @@
+{
+  "name": "enfurbish",
+  "description": "Claude Code plugins by phreakocious: session continuity and project-instruction approval gating.",
+  "owner": {
+    "name": "phreakocious",
+    "email": "567063+phreakocious@users.noreply.github.com"
+  },
+  "plugins": [
+    {
+      "name": "continuity",
+      "source": "./continuity",
+      "description": "Intentional session continuity: /wrap retro, /resume command, and a SessionStart hook that surfaces NEXT_SESSION.md handoffs.",
+      "category": "workflow",
+      "keywords": ["session", "continuity", "retro", "handoff", "skills"]
+    },
+    {
+      "name": "affirm",
+      "source": "./affirm",
+      "description": "Approval gate for project instructions. Surfaces new or modified CLAUDE.md and .claude/rules/* files at session start before Claude treats them as trusted.",
+      "category": "security",
+      "keywords": ["security", "prompt-injection", "claudemd", "approval", "guard"]
+    }
+  ]
+}
