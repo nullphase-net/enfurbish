@@ -9,7 +9,7 @@
     {
       "name": "continuity",
       "source": "./continuity",
-      "description": "Intentional session continuity: /wrap retro, /resume command, and a SessionStart hook that surfaces NEXT_SESSION.md handoffs.",
+      "description": "Intentional session continuity: /wrap retro, /next command, and a SessionStart hook that surfaces NEXT_SESSION.md handoffs.",
       "category": "workflow",
       "keywords": ["session", "continuity", "retro", "handoff", "skills"]
     },

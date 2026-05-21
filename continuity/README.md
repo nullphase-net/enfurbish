@@ -2,7 +2,7 @@
 
 Intentional session continuity for Claude Code.
 
-A plugin that closes the loop between Claude Code sessions: `/wrap` ends a session by producing a retro, a tooling-stack verdict, and a handoff note. A `SessionStart` hook surfaces the handoff at the start of the next session. `/resume` is a manual mirror for when the hook didn't fire.
+A plugin that closes the loop between Claude Code sessions: `/wrap` ends a session by producing a retro, a tooling-stack verdict, and a handoff note. A `SessionStart` hook surfaces the handoff at the start of the next session. `/next` is a manual mirror for when the hook didn't fire.
 
 ## Commands
 
@@ -14,19 +14,19 @@ Run at the end of a session. Produces three files:
 - **Tooling-journal entry** — appended to `~/.claude/tooling-journal.md`. Cross-session verdicts on the parts of your stack you can change.
 - **Handoff** — `<cwd>/NEXT_SESSION.md`. What the next session should pick up. Reconciled with any existing file: items survive until they're actually done, not until the next wrap fires.
 
-### `/resume`
+### `/next`
 
 Read-only. Reads the local `NEXT_SESSION.md` and summarizes "Start here" + "Open threads". Use when the SessionStart hook didn't fire or you want to re-consult mid-session.
 
 ### `SessionStart` hook
 
-Fires on session startup, `/clear`, and post-compact. Walks up to the project root (nearest `.git` or `CLAUDE.md`), recursively scans for `NEXT_SESSION.md` files (depth 4, with an ignore list), and emits a `systemMessage` banner if any are found. The banner names the file(s) and suggests `/resume`. **The handoff content is not loaded into context until you ask** — so a fresh session stays clean if you don't want to pick up.
+Fires on session startup, `/clear`, and post-compact. Walks up to the project root (nearest `.git` or `CLAUDE.md`), recursively scans for `NEXT_SESSION.md` files (depth 4, with an ignore list), and emits a `systemMessage` banner if any are found. The banner names the file(s) and suggests `/next`. **The handoff content is not loaded into context until you ask** — so a fresh session stays clean if you don't want to pick up.
 
 Three states:
 
 | Local file? | Siblings elsewhere? | Hook output |
 |---|---|---|
-| yes | — | banner with mtime, suggests `/resume`, lists siblings if any |
+| yes | — | banner with mtime, suggests `/next`, lists siblings if any |
 | no | yes | banner listing sibling paths and mtimes |
 | no | no | silent (`{}`) |
 
@@ -116,7 +116,7 @@ The plugin never modifies CLAUDE.md without asking. CLAUDE.md is user-authored, 
 ```
 
 Once installed:
-- `/wrap` and `/resume` appear as slash commands
+- `/wrap` and `/next` appear as slash commands
 - The `SessionStart` hook fires automatically
 
 ## Requirements

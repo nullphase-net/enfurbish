@@ -28,7 +28,7 @@ test("emits only a systemMessage when local NEXT_SESSION.md is present (no conte
   expect(res.status).toBe(0);
   const json = JSON.parse(res.stdout);
   expect(json.systemMessage).toMatch(/^Continuity: NEXT_SESSION.md present/);
-  expect(json.systemMessage).toContain("/resume");
+  expect(json.systemMessage).toContain("/next");
   expect(json.hookSpecificOutput).toBeUndefined();
   expect(JSON.stringify(json)).not.toContain("Resume the auth refactor.");
 });

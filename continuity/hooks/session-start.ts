@@ -69,7 +69,7 @@ export function buildBanner(opts: {
   if (!local && siblings.length === 0) return null;
 
   if (local) {
-    let msg = `Continuity: NEXT_SESSION.md present from your last wrap (modified ${fmtTs(local.mtimeMs)} UTC). Run /resume to pick it up.`;
+    let msg = `Continuity: NEXT_SESSION.md present from your last wrap (modified ${fmtTs(local.mtimeMs)} UTC). Run /next to pick it up.`;
     if (siblings.length > 0) {
       msg += ` ${siblings.length} sibling handoff${siblings.length === 1 ? "" : "s"} also found:`;
       for (const s of siblings) {

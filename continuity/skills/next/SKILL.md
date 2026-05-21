@@ -1,9 +1,9 @@
 ---
-name: resume
+name: next
 description: Manually read NEXT_SESSION.md in the current cwd and brief the user on what's pending. Mirror of the SessionStart hook for cases where the hook didn't fire or the user wants to re-consult mid-session.
 ---
 
-# `/resume` — manual NEXT_SESSION read
+# `/next` — manual NEXT_SESSION read
 
 Use when the user wants to pick up where the last session left off and either the SessionStart hook didn't surface anything, was disabled, or the user wants to re-consult later in the session.
 
@@ -18,9 +18,9 @@ Use when the user wants to pick up where the last session left off and either th
 
 ## What this skill does NOT do
 
-- Write or modify any file. `/resume` is read-only by design.
+- Write or modify any file. `/next` is read-only by design.
 - Touch the tooling journal or retro files.
-- Scan subdirectories for sibling `NEXT_SESSION.md` files. That's the SessionStart hook's job at session start; `/resume` is for the local file only.
+- Scan subdirectories for sibling `NEXT_SESSION.md` files. That's the SessionStart hook's job at session start; `/next` is for the local file only.
 
 ## Edge cases
 

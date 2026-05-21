@@ -12,7 +12,7 @@ Closes the loop between Claude Code sessions.
 
 - **`/wrap`** ends a session by producing a retro, a tooling-stack verdict, and a `NEXT_SESSION.md` handoff for the next time.
 - **`SessionStart` hook** surfaces the handoff at the start of the next session via a `systemMessage` banner — no context dump unless you opt in.
-- **`/resume`** loads the handoff on demand.
+- **`/next`** loads the handoff on demand.
 
 See [continuity/README.md](./continuity/README.md) for the tooling-journal format and what `/wrap` measures.
 
