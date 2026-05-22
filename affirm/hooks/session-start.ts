@@ -12,7 +12,7 @@ export function buildBanner(input: BannerInput): string {
   const { projectDir, classification } = input;
   const { approved, added, changed } = classification;
 
-  let msg = "Instruction files in this project:\n";
+  let msg = "Affirm: instruction files in this project:\n";
   for (const f of approved) msg += `  ✓ ${relative(projectDir, f)}\n`;
   for (const f of added) msg += `  ✦ ${relative(projectDir, f)}  [NEW — unaffirmed]\n`;
   for (const f of changed) msg += `  ✧ ${relative(projectDir, f)}  [CHANGED — unaffirmed]\n`;
