@@ -40,41 +40,48 @@ test("no instruction files: prints message and exits 0", () => {
   expect(io.out.join("\n")).toContain("No CLAUDE.md or .claude/rules/ files found");
 });
 
-test("no-arg (affirm) records hashes for all instruction files", () => {
+test("bare invocation shows details, records nothing", () => {
   const { dir, hashPath } = mkProject();
   writeFileSync(join(dir, "CLAUDE.md"), "rules");
   const io = collect();
   const code = runCli([], opts(dir, hashPath, io));
   expect(code).toBe(0);
-  expect(io.out.join("\n")).toContain("Affirmed 1 file");
-  expect(loadHashes(hashPath)[join(dir, "CLAUDE.md")]).toBe(sha256OfFile(join(dir, "CLAUDE.md")));
+  const out = io.out.join("\n");
+  expect(out).toContain("Instruction files in");
+  expect(out).toContain("CLAUDE.md");
+  expect(out).toMatch(/status:\s+NEW \(not yet affirmed\)/);
+  expect(out).toMatch(/modified:\s+\d{4}-\d{2}-\d{2}T/);
+  expect(out).toContain("/affirm -a");  // hint footer
+  // Nothing recorded
+  expect(loadHashes(hashPath)).toEqual({});
 });
 
-test("--show reports NEW for unaffirmed and affirmed for matching", () => {
+test("bare invocation shows affirmed status for matching hash", () => {
   const { dir, hashPath } = mkProject();
   writeFileSync(join(dir, "CLAUDE.md"), "rules");
-  mkdirSync(join(dir, ".claude", "rules"), { recursive: true });
-  writeFileSync(join(dir, ".claude", "rules", "x.md"), "x");
-
-  // Pre-affirm CLAUDE.md only
   saveHashes({ [join(dir, "CLAUDE.md")]: sha256OfFile(join(dir, "CLAUDE.md")) }, hashPath);
-
   const io = collect();
-  runCli(["--show"], opts(dir, hashPath, io));
-  const out = io.out.join("\n");
-  expect(out).toContain("CLAUDE.md  [affirmed]");
-  expect(out).toMatch(/x\.md\s+\[NEW \(not yet affirmed\)\]/);
+  runCli([], opts(dir, hashPath, io));
+  expect(io.out.join("\n")).toMatch(/status:\s+affirmed/);
 });
 
-test("--show reports CHANGED after file mutation", () => {
+test("bare invocation flags CHANGED after file mutation", () => {
   const { dir, hashPath } = mkProject();
   writeFileSync(join(dir, "CLAUDE.md"), "v1");
   saveHashes({ [join(dir, "CLAUDE.md")]: sha256OfFile(join(dir, "CLAUDE.md")) }, hashPath);
   writeFileSync(join(dir, "CLAUDE.md"), "v2");
-
   const io = collect();
-  runCli(["--show"], opts(dir, hashPath, io));
-  expect(io.out.join("\n")).toContain("[CHANGED (hash mismatch)]");
+  runCli([], opts(dir, hashPath, io));
+  expect(io.out.join("\n")).toContain("CHANGED (hash mismatch)");
+});
+
+test("--show is no longer recognized", () => {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "rules");
+  const io = collect();
+  const code = runCli(["--show"], opts(dir, hashPath, io));
+  expect(code).toBe(2);
+  expect(io.err.join("\n")).toContain("Unknown argument: --show");
 });
 
 test("--revoke removes affirmations for this project only", () => {
