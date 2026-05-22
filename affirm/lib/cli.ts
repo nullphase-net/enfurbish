@@ -75,11 +75,18 @@ export type CliOpts = {
 };
 
 export function runCli(argv: string[], opts: CliOpts): number {
-  const arg = argv[0];
-  if (arg === "--help" || arg === "-h") {
+  const args = new Set(argv);
+  if (args.has("--help") || args.has("-h")) {
     opts.out(usage());
     return 0;
   }
+  const wantsApply = args.has("-a") || args.has("--apply");
+  const wantsRevoke = args.has("-r") || args.has("--revoke");
+  if (wantsApply && wantsRevoke) {
+    opts.err(`-a/--apply and -r/--revoke are mutually exclusive\n\n${usage()}`);
+    return 2;
+  }
+  const arg = argv[0];
 
   const hashPath = opts.hashPath ?? HASH_FILE;
   const projectDir = normalizeProjectDir(opts.cwd);

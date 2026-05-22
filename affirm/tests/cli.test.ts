@@ -144,3 +144,22 @@ test("-r revokes (short form of --revoke)", () => {
   expect(code).toBe(0);
   expect(io.out.join("\n")).toContain("Revoked 1 affirmation");
 });
+
+test("-a and -r together exit 2 with usage", () => {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "rules");
+  const io = collect();
+  const code = runCli(["-a", "-r"], opts(dir, hashPath, io));
+  expect(code).toBe(2);
+  expect(io.err.join("\n")).toContain("mutually exclusive");
+  expect(io.err.join("\n")).toContain("Usage:");
+});
+
+test("--apply and --revoke together exit 2 with usage", () => {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "rules");
+  const io = collect();
+  const code = runCli(["--apply", "--revoke"], opts(dir, hashPath, io));
+  expect(code).toBe(2);
+  expect(io.err.join("\n")).toContain("mutually exclusive");
+});
