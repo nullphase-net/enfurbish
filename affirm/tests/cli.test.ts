@@ -108,3 +108,32 @@ test("unknown argument exits 2 with usage on stderr", () => {
   expect(io.err.join("\n")).toContain("Unknown argument: --bogus");
   expect(io.err.join("\n")).toContain("Usage:");
 });
+
+test("-a records hashes (same behavior as bare invocation today)", () => {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "rules");
+  const io = collect();
+  const code = runCli(["-a"], opts(dir, hashPath, io));
+  expect(code).toBe(0);
+  expect(io.out.join("\n")).toContain("Affirmed 1 file");
+  expect(loadHashes(hashPath)[join(dir, "CLAUDE.md")]).toBe(sha256OfFile(join(dir, "CLAUDE.md")));
+});
+
+test("--apply records hashes (long form of -a)", () => {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "rules");
+  const io = collect();
+  const code = runCli(["--apply"], opts(dir, hashPath, io));
+  expect(code).toBe(0);
+  expect(io.out.join("\n")).toContain("Affirmed 1 file");
+});
+
+test("-r revokes (short form of --revoke)", () => {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "rules");
+  saveHashes({ [join(dir, "CLAUDE.md")]: sha256OfFile(join(dir, "CLAUDE.md")) }, hashPath);
+  const io = collect();
+  const code = runCli(["-r"], opts(dir, hashPath, io));
+  expect(code).toBe(0);
+  expect(io.out.join("\n")).toContain("Revoked 1 affirmation");
+});

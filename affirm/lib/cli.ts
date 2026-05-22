@@ -13,9 +13,10 @@ import {
 function usage(): string {
   return [
     "Usage:",
-    "  affirm                affirm all CLAUDE.md / .claude/rules/* files in cwd",
-    "  affirm --show         show affirmation status for files in cwd",
-    "  affirm --revoke       remove affirmation for files in cwd",
+    "  affirm                show status, mtime, and git info for instruction files in cwd",
+    "  affirm -a, --apply    record SHA-256 hashes (the attestation)",
+    "  affirm -r, --revoke   remove affirmation for files in cwd",
+    "  affirm --show         (deprecated alias for bare invocation)",
     "  affirm --help         show this message",
   ].join("\n");
 }
@@ -64,7 +65,7 @@ export function runCli(argv: string[], opts: CliOpts): number {
     return 0;
   }
 
-  if (arg === "--revoke") {
+  if (arg === "--revoke" || arg === "-r") {
     const { revoked } = revokeProject(projectDir, hashPath);
     if (revoked.length === 0) {
       opts.out(`No prior affirmations to revoke in ${projectDir}.`);
@@ -77,17 +78,17 @@ export function runCli(argv: string[], opts: CliOpts): number {
     return 0;
   }
 
-  if (arg !== undefined && arg !== "affirm") {
-    opts.err(`Unknown argument: ${arg}\n\n${usage()}`);
-    return 2;
+  if (arg === "-a" || arg === "--apply" || arg === undefined || arg === "affirm") {
+    const { approved } = approveAll(projectDir, hashPath);
+    opts.out(`Affirmed ${approved.length} file${approved.length === 1 ? "" : "s"} in ${projectDir}:`);
+    for (const { path, hash } of approved) {
+      opts.out(`  ${relative(projectDir, path)}  (${hash.slice(0, 12)}…)`);
+    }
+    return 0;
   }
 
-  const { approved } = approveAll(projectDir, hashPath);
-  opts.out(`Affirmed ${approved.length} file${approved.length === 1 ? "" : "s"} in ${projectDir}:`);
-  for (const { path, hash } of approved) {
-    opts.out(`  ${relative(projectDir, path)}  (${hash.slice(0, 12)}…)`);
-  }
-  return 0;
+  opts.err(`Unknown argument: ${arg}\n\n${usage()}`);
+  return 2;
 }
 
 if (import.meta.main) {
