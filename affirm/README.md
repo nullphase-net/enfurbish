@@ -14,7 +14,7 @@ Every time a Claude Code session starts in a project with a `CLAUDE.md` or `.cla
 ## Banner format
 
 ```
-Instruction files in this project:
+Affirm: instruction files in this project:
   ✓ CLAUDE.md
   ✦ .claude/rules/style.md  [NEW — unaffirmed]
   ✧ .claude/rules/security.md  [CHANGED — unaffirmed]
@@ -34,13 +34,13 @@ When everything is affirmed the banner shows only `✓` lines and no warning.
 
 ### `/affirm`
 
-Run after reviewing flagged files. Records SHA-256 hashes for every `CLAUDE.md` / `.claude/rules/*` file in the current cwd to `~/.claude/affirm-hashes.json`. The skill shows you the status first and confirms before writing.
+Read-only. Shows each instruction file in the current cwd with its affirmation status, modification time, and git info (last commit author + date, and whether there are uncommitted local changes).
 
-### `/affirm --show`
+### `/affirm -a` (or `--apply`)
 
-Read-only. Lists each instruction file with its current affirmation status.
+Records SHA-256 hashes for every `CLAUDE.md` / `.claude/rules/*` file in the current cwd to `~/.claude/affirm-hashes.json`. Invoking `-a` is itself the attestation — there's no separate "are you sure?" prompt.
 
-### `/affirm --revoke`
+### `/affirm -r` (or `--revoke`)
 
 Removes affirmation records for the current cwd. The next session will surface those files as `NEW`. Useful for forcing yourself to re-review.
 
@@ -49,9 +49,9 @@ Removes affirmation records for the current cwd. The next session will surface t
 If you don't want to go through the skill, run the CLI from a shell in the project root:
 
 ```bash
-bun run <plugin-root>/lib/cli.ts            # affirm all
-bun run <plugin-root>/lib/cli.ts --show     # show status
-bun run <plugin-root>/lib/cli.ts --revoke   # revoke this project's affirmations
+bun run <plugin-root>/lib/cli.ts          # show details
+bun run <plugin-root>/lib/cli.ts -a       # record hashes
+bun run <plugin-root>/lib/cli.ts -r       # revoke
 ```
 
 ## Scope and threat model
