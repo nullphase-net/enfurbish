@@ -12,10 +12,23 @@ const IGNORE_DIRS = new Set([
 
 export type NextSessionFile = { path: string; mtimeMs: number };
 
+export type ScanResult = {
+  files: NextSessionFile[];
+  elapsedMs: number;
+  /** Per-toplevel-segment walk counts (subdirs entered under that toplevel). */
+  walks: Map<string, number>;
+};
+
 export function scanForNextSessions(root: string, maxDepth = MAX_DEPTH): NextSessionFile[] {
+  return scanForNextSessionsWithStats(root, maxDepth).files;
+}
+
+export function scanForNextSessionsWithStats(root: string, maxDepth = MAX_DEPTH): ScanResult {
   const out: NextSessionFile[] = [];
   const ignored = getIgnoredDirs(root);
-  function walk(dir: string, depth: number) {
+  const walks = new Map<string, number>();
+  const start = performance.now();
+  function walk(dir: string, depth: number, topLevel: string | null) {
     if (depth > maxDepth) return;
     let entries;
     try {
@@ -33,7 +46,9 @@ export function scanForNextSessions(root: string, maxDepth = MAX_DEPTH): NextSes
         if (e.name.startsWith(".")) continue;
         if (IGNORE_DIRS.has(e.name)) continue;
         if (ignored.has(full)) continue;
-        walk(full, depth + 1);
+        const nextTop = topLevel ?? e.name;
+        walks.set(nextTop, (walks.get(nextTop) ?? 0) + 1);
+        walk(full, depth + 1, nextTop);
       } else if (e.isFile() && e.name === "NEXT_SESSION.md") {
         try {
           const st = statSync(full);
@@ -42,8 +57,8 @@ export function scanForNextSessions(root: string, maxDepth = MAX_DEPTH): NextSes
       }
     }
   }
-  walk(root, 0);
-  return out;
+  walk(root, 0, null);
+  return { files: out, elapsedMs: performance.now() - start, walks };
 }
 
 export function findProjectRoot(start: string): string {
@@ -93,6 +108,19 @@ export function buildBanner(opts: {
   return msg;
 }
 
+function formatSlowNote(elapsedMs: number, walks: Map<string, number>): string {
+  const totalDirs = Array.from(walks.values()).reduce((a, b) => a + b, 0);
+  // Top 2 contributors by walk count.
+  const top = Array.from(walks.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([name, n]) => `./${name} ${n} dirs`)
+    .join(", ");
+  const secs = (elapsedMs / 1000).toFixed(1);
+  const topClause = top.length > 0 ? ` · top: ${top}` : "";
+  return ` (slow scan: ${secs}s · ${totalDirs} dirs${topClause})`;
+}
+
 function debugLog(line: string) {
   if (!process.env.CONTINUITY_DEBUG) return;
   try {
@@ -105,13 +133,18 @@ if (import.meta.main) {
   try {
     const sessionCwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
     const projectRoot = findProjectRoot(sessionCwd);
-    const files = scanForNextSessions(projectRoot);
+    const { files, elapsedMs, walks } = scanForNextSessionsWithStats(projectRoot);
     const banner = buildBanner({ sessionCwd, projectRoot, files });
-    debugLog(`cwd=${sessionCwd} root=${projectRoot} files=${files.length} emit=${banner === null ? "empty" : "banner"}`);
+    debugLog(`cwd=${sessionCwd} root=${projectRoot} files=${files.length} elapsedMs=${elapsedMs.toFixed(1)} emit=${banner === null ? "empty" : "banner"}`);
     if (banner === null) {
       process.stdout.write("{}\n");
     } else {
-      process.stdout.write(JSON.stringify({ systemMessage: banner }) + "\n");
+      const slowMsRaw = Number.parseInt(process.env.CONTINUITY_SLOW_MS ?? "500", 10);
+      const slowMs = Number.isFinite(slowMsRaw) ? slowMsRaw : 500;
+      const withNote = elapsedMs > slowMs
+        ? banner + formatSlowNote(elapsedMs, walks)
+        : banner;
+      process.stdout.write(JSON.stringify({ systemMessage: withNote }) + "\n");
     }
     process.exit(0);
   } catch (e) {

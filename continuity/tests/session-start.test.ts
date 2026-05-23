@@ -205,3 +205,33 @@ test("scanForNextSessions does NOT find NEXT_SESSION.md inside a gitignored dir"
     fx.cleanup();
   }
 });
+
+test("slow-scan suffix appears when CONTINUITY_SLOW_MS=0 forces it (and a handoff is present)", () => {
+  const root = mkdtempSync(join(tmpdir(), "scan-slow-suffix-"));
+  // Create some directories that get walked so 'top:' has something to name.
+  mkdirSync(join(root, "src"));
+  mkdirSync(join(root, "src", "a"));
+  mkdirSync(join(root, "src", "b"));
+  writeFileSync(join(root, "NEXT_SESSION.md"), "handoff");
+  const res = spawnSync("bun", ["run", SCRIPT], {
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: root, CONTINUITY_SLOW_MS: "0" },
+  });
+  const json = JSON.parse(res.stdout);
+  expect(json.systemMessage).toContain("Continuity:");
+  expect(json.systemMessage).toContain("(slow scan:");
+  expect(json.systemMessage).toContain("dirs · top:");
+  expect(json.systemMessage).toMatch(/top: \.\/\S+ \d+ dirs/);
+});
+
+test("slow scan with no handoffs still emits {} (suffix-only invariant)", () => {
+  const root = mkdtempSync(join(tmpdir(), "scan-slow-empty-"));
+  mkdirSync(join(root, "src"));
+  // No NEXT_SESSION.md anywhere.
+  const res = spawnSync("bun", ["run", SCRIPT], {
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: root, CONTINUITY_SLOW_MS: "0" },
+  });
+  expect(res.status).toBe(0);
+  expect(res.stdout.trim()).toBe("{}");
+});
