@@ -41,7 +41,7 @@ test("banner marks all files NEW when hash store is empty", () => {
     env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home },
   });
   const json = JSON.parse(res.stdout);
-  expect(json.systemMessage).toContain("Instruction files in this project:");
+  expect(json.systemMessage).toContain("Affirm: instruction files in this project:");
   expect(json.systemMessage).toContain("✦ CLAUDE.md  [NEW — unaffirmed]");
   expect(json.systemMessage).toContain("Review unaffirmed files");
   expect(json.systemMessage).toContain("/affirm");
@@ -109,4 +109,18 @@ test("emits {} when CLAUDE_PROJECT_DIR points to a missing dir", () => {
   const res = runHook({ CLAUDE_PROJECT_DIR: "/no/such/path/exists" });
   expect(res.status).toBe(0);
   expect(res.stdout.trim()).toBe("{}");
+});
+
+test("banner is prefixed with 'Affirm:'", () => {
+  const home = mkDir("affirm-home-");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const dir = mkDir("affirm-proj-");
+  writeFileSync(join(dir, "CLAUDE.md"), "v1");
+
+  const res = spawnSync("bun", ["run", SCRIPT], {
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home },
+  });
+  const json = JSON.parse(res.stdout);
+  expect(json.systemMessage.startsWith("Affirm:")).toBe(true);
 });
