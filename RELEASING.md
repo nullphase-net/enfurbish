@@ -5,7 +5,7 @@ Each plugin (`continuity/`, `affirm/`) ships independently. There is no top-leve
 ## What goes where
 
 - `<plugin>/.claude-plugin/plugin.json` — the `version` field. Bump it in the same commit as the change.
-- Annotated tag `<plugin>-vX.Y.Z` pointing at that commit. The tag is what Claude Code's plugin marketplace consumes.
+- Annotated tag `<plugin>-vX.Y.Z` at the ship-point on `main`: the merge commit if the work landed via merge (e.g., from a worktree), otherwise the bump commit directly. The tag is what Claude Code's plugin marketplace consumes.
 - `~/.claude/plugins/cache/enfurbish/<plugin>/<version>/` — the installed plugin tree on this machine. `~/.claude/plugins/installed_plugins.json` records the version and commit sha.
 
 ## Versioning
@@ -23,7 +23,7 @@ If a change touches both `continuity/` and `affirm/`, bump them independently wi
 1. Make the change. Add or update tests. `bun test` green.
 2. Bump `<plugin>/.claude-plugin/plugin.json` `version`.
 3. Commit. Message: `<plugin>: <short summary>` (matches the existing log shape — see `git log --oneline`).
-4. Tag: `git tag -a <plugin>-vX.Y.Z -m "<plugin> X.Y.Z — <one-line>"`.
+4. Tag the ship-point on `main` (merge commit if work landed via merge, bump commit otherwise). With HEAD at that commit: `git tag -a <plugin>-vX.Y.Z -m "<plugin> X.Y.Z — <one-line>"`.
 5. Push branch + tag: `git push && git push origin <plugin>-vX.Y.Z`.
 6. On any machine running the plugin, pull the new version through Claude Code's plugin update flow (the marketplace caches by commit sha, so a `git pull` of the cache directory or a `/plugin update <name>@enfurbish` is required — it is NOT picked up automatically until then).
 
