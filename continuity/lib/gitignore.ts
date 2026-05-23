@@ -60,3 +60,30 @@ export function isFileTracked(projectRoot: string, relPath: string): boolean {
   const r = git(projectRoot, ["ls-files", "--error-unmatch", "--", relPath]);
   return r.code === 0;
 }
+
+function isInRepo(projectRoot: string): boolean {
+  return git(projectRoot, ["rev-parse", "--is-inside-work-tree"]).code === 0;
+}
+
+function suggestLine(projectRoot: string, relPath: string, forWrite: boolean): string {
+  if (!forWrite) return "";
+  if (!isInRepo(projectRoot)) return "";
+  if (isFileIgnored(projectRoot, relPath)) return "";
+  if (isFileTracked(projectRoot, relPath)) return "";
+  return `  Note: ${relPath} isn't gitignored — consider adding \`${relPath}\` to .gitignore so it stays out of commits.`;
+}
+
+if (import.meta.main) {
+  const argv = process.argv.slice(2);
+  const idx = argv.indexOf("--suggest-line");
+  if (idx === -1 || argv[idx + 1] === undefined) {
+    // Unknown / missing args: stay silent, exit 0. The skill calls us;
+    // failing loudly would break /wrap's final report.
+    process.exit(0);
+  }
+  const relPath = argv[idx + 1]!;
+  const forWrite = argv.includes("--for-write");
+  const line = suggestLine(process.cwd(), relPath, forWrite);
+  if (line.length > 0) process.stdout.write(line + "\n");
+  process.exit(0);
+}

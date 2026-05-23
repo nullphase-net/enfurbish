@@ -108,3 +108,59 @@ test("isFileTracked returns false for an untracked file", () => {
     fx.cleanup();
   }
 });
+
+const CLI = join(import.meta.dir, "..", "lib", "gitignore.ts");
+
+test("CLI --suggest-line --for-write prints suggestion when all conditions hold", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gitignore-cli-emit-"));
+  const fx = gitInitClean(dir);
+  try {
+    writeFileSync(join(dir, "NEXT_SESSION.md"), "handoff");
+    // not ignored, not tracked, git repo, --for-write present
+    const r = spawnSync("bun", ["run", CLI, "--suggest-line", "NEXT_SESSION.md", "--for-write"], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("NEXT_SESSION.md isn't gitignored");
+    expect(r.stdout).toContain("stays out of commits");
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("CLI --suggest-line --for-write prints empty when the file is tracked", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gitignore-cli-tracked-"));
+  const fx = gitInitClean(dir);
+  try {
+    writeFileSync(join(dir, "NEXT_SESSION.md"), "handoff");
+    spawnSync("git", ["add", "NEXT_SESSION.md"], { cwd: dir });
+    spawnSync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
+    const r = spawnSync("bun", ["run", CLI, "--suggest-line", "NEXT_SESSION.md", "--for-write"], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe("");
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("CLI --suggest-line without --for-write prints empty regardless", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gitignore-cli-nowrite-"));
+  const fx = gitInitClean(dir);
+  try {
+    writeFileSync(join(dir, "NEXT_SESSION.md"), "handoff");
+    // Even though all OTHER conditions are met, without --for-write the CLI
+    // must remain silent.
+    const r = spawnSync("bun", ["run", CLI, "--suggest-line", "NEXT_SESSION.md"], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe("");
+  } finally {
+    fx.cleanup();
+  }
+});
