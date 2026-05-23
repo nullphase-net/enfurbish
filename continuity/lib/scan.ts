@@ -1,10 +1,14 @@
-import { readdirSync, statSync, existsSync, createReadStream } from "node:fs";
+import { readdirSync, statSync, existsSync, createReadStream, realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 
 export function encodeCwd(cwd: string): string {
   return cwd.replaceAll("/", "-");
+}
+
+function safeRealpath(p: string): string {
+  try { return realpathSync(p); } catch { return p; }
 }
 
 type FindArgs = { cwd: string; projectsRoot?: string };
@@ -28,9 +32,16 @@ async function peekFirstCwdAndLastTs(path: string): Promise<{ firstCwd?: string;
 
 export async function findTranscript({ cwd, projectsRoot }: FindArgs): Promise<FindResult> {
   const root = projectsRoot ?? join(homedir(), ".claude", "projects");
-  const encodedDir = join(root, encodeCwd(cwd));
+  // 2026-05-22: callers pass cwd via $(pwd), which on macOS resolves
+  // symlinked paths like /Users/tb/projects/... rather than the canonical
+  // /Volumes/chonk/projects/... that owns the transcript dir. Canonicalize
+  // both sides so the lookup survives the symlink boundary.
+  const canonicalCwd = safeRealpath(cwd);
   const candidates: string[] = [];
-  if (existsSync(encodedDir)) {
+  const dirsToTry: string[] = [join(root, encodeCwd(canonicalCwd))];
+  if (canonicalCwd !== cwd) dirsToTry.push(join(root, encodeCwd(cwd)));
+  for (const encodedDir of dirsToTry) {
+    if (!existsSync(encodedDir)) continue;
     for (const name of readdirSync(encodedDir)) {
       if (name.endsWith(".jsonl")) candidates.push(join(encodedDir, name));
     }
@@ -48,11 +59,17 @@ export async function findTranscript({ cwd, projectsRoot }: FindArgs): Promise<F
   let best: FindResult | null = null;
   for (const p of candidates) {
     const { firstCwd, lastTs } = await peekFirstCwdAndLastTs(p);
-    if (firstCwd !== cwd) continue;
+    if (!firstCwd) continue;
+    const canonicalFirstCwd = safeRealpath(firstCwd);
+    const matches = firstCwd === cwd
+      || firstCwd === canonicalCwd
+      || canonicalFirstCwd === cwd
+      || canonicalFirstCwd === canonicalCwd;
+    if (!matches) continue;
     if (!lastTs) continue;
     if (best === null || lastTs > best.lastEventTs) {
       const sid = basename(p, ".jsonl");
-      best = { path: p, sessionId: sid, cwd, lastEventTs: lastTs };
+      best = { path: p, sessionId: sid, cwd: firstCwd, lastEventTs: lastTs };
     }
   }
   if (!best) throw new Error(`transcript not found for cwd ${cwd}`);

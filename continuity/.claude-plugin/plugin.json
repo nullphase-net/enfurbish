@@ -1,7 +1,7 @@
 {
   "name": "continuity",
   "description": "Intentional session continuity for Claude Code: a /wrap retro, a /next command, and a SessionStart hook that surfaces NEXT_SESSION.md handoffs.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "MIT",
   "keywords": ["session", "continuity", "retro", "handoff", "skills"]
 }

@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { encodeCwd, findTranscript, parseTranscript } from "../lib/scan";
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -83,6 +83,33 @@ test("findTranscript throws not-found when nothing matches", async () => {
   const root = mkdtempSync(join(tmpdir(), "wrap-scan-"));
   await expect(findTranscript({ cwd: "/no/such/cwd", projectsRoot: root }))
     .rejects.toThrow(/transcript not found/);
+});
+
+test("findTranscript resolves cwd through a symlink to its canonical path", async () => {
+  // Models the field-report case: $(pwd) returns /Users/tb/projects/X (symlink)
+  // but the transcript dir is encoded from /Volumes/chonk/projects/X (canonical).
+  const root = mkdtempSync(join(tmpdir(), "wrap-scan-sl-"));
+  const workspace = mkdtempSync(join(tmpdir(), "wrap-ws-"));
+  const realPath = join(workspace, "real");
+  mkdirSync(realPath, { recursive: true });
+  // Resolve through any /private prefix macOS adds in /var/folders.
+  const canonicalReal = realpathSync(realPath);
+  const symlinkPath = join(workspace, "link");
+  symlinkSync(canonicalReal, symlinkPath);
+
+  const proj = join(root, encodeCwd(canonicalReal));
+  mkdirSync(proj, { recursive: true });
+  const transcript = join(proj, "66666666-0000-0000-0000-000000000000.jsonl");
+  writeFileSync(transcript, JSON.stringify({
+    type: "user", cwd: canonicalReal,
+    timestamp: "2026-05-22T00:00:00.000Z",
+    sessionId: "66666666-0000-0000-0000-000000000000",
+    message: { role: "user", content: [] },
+  }) + "\n");
+
+  const result = await findTranscript({ cwd: symlinkPath, projectsRoot: root });
+  expect(result.path).toBe(transcript);
+  expect(result.sessionId).toBe("66666666-0000-0000-0000-000000000000");
 });
 
 const FIXTURE = join(import.meta.dir, "..", "fixtures", "happy-session.jsonl");
