@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { scanForNextSessions } from "../hooks/session-start";
 
 const SCRIPT = join(import.meta.dir, "..", "hooks", "session-start.ts");
 
@@ -141,4 +142,17 @@ test("emits empty JSON when CLAUDE_PROJECT_DIR points to a missing directory", (
   const res = runHook({ CLAUDE_PROJECT_DIR: "/no/such/path/exists" });
   expect(res.status).toBe(0);
   expect(res.stdout.trim()).toBe("{}");
+});
+
+test("scanForNextSessions skips dotdirs (e.g., .cache)", () => {
+  const root = mkdtempSync(join(tmpdir(), "scan-dotdir-"));
+  mkdirSync(join(root, ".cache"));
+  // A handoff in a dotdir must NOT be found.
+  writeFileSync(join(root, ".cache", "NEXT_SESSION.md"), "should be skipped");
+  // A handoff at the visible root MUST be found.
+  writeFileSync(join(root, "NEXT_SESSION.md"), "should be found");
+  const found = scanForNextSessions(root);
+  const paths = found.map((f) => f.path);
+  expect(paths).toContain(join(root, "NEXT_SESSION.md"));
+  expect(paths).not.toContain(join(root, ".cache", "NEXT_SESSION.md"));
 });

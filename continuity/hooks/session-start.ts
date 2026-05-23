@@ -25,6 +25,9 @@ export function scanForNextSessions(root: string, maxDepth = MAX_DEPTH): NextSes
       if (e.isSymbolicLink()) continue;
       const full = join(dir, e.name);
       if (e.isDirectory()) {
+        // Cheap-first pruning (per project invariant on ordering): name-based
+        // checks happen before any absolute-path allocation.
+        if (e.name.startsWith(".")) continue;
         if (IGNORE_DIRS.has(e.name)) continue;
         walk(full, depth + 1);
       } else if (e.isFile() && e.name === "NEXT_SESSION.md") {
