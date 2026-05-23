@@ -82,6 +82,9 @@ if (import.meta.main) {
     process.exit(0);
   }
   const relPath = argv[idx + 1]!;
+  // Guard against `--suggest-line --for-write` (flag-as-path); behave as if
+  // the positional path were missing rather than emit a confusing suggestion.
+  if (relPath.startsWith("-")) process.exit(0);
   const forWrite = argv.includes("--for-write");
   const line = suggestLine(process.cwd(), relPath, forWrite);
   if (line.length > 0) process.stdout.write(line + "\n");
