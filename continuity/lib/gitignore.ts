@@ -51,3 +51,12 @@ export function isFileIgnored(projectRoot: string, relPath: string): boolean {
   const r = git(projectRoot, ["check-ignore", "-q", "--", relPath]);
   return r.code === 0;
 }
+
+/**
+ * `git ls-files --error-unmatch <relPath>` returns exit 0 iff the path is
+ * tracked. Returns false on any other exit.
+ */
+export function isFileTracked(projectRoot: string, relPath: string): boolean {
+  const r = git(projectRoot, ["ls-files", "--error-unmatch", "--", relPath]);
+  return r.code === 0;
+}

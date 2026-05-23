@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getIgnoredDirs, isFileIgnored } from "../lib/gitignore";
+import { getIgnoredDirs, isFileIgnored, isFileTracked } from "../lib/gitignore";
 import { gitInitClean } from "./helpers/git";
 
 test("getIgnoredDirs returns empty Set outside a git repo", () => {
@@ -79,6 +79,31 @@ test("isFileIgnored returns false when the file is not in .gitignore", () => {
     writeFileSync(join(dir, ".gitignore"), "");
     writeFileSync(join(dir, "NEXT_SESSION.md"), "handoff");
     expect(isFileIgnored(dir, "NEXT_SESSION.md")).toBe(false);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("isFileTracked returns true for a committed file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gitignore-tracked-true-"));
+  const fx = gitInitClean(dir);
+  try {
+    writeFileSync(join(dir, "NEXT_SESSION.md"), "handoff");
+    spawnSync("git", ["add", "NEXT_SESSION.md"], { cwd: dir });
+    spawnSync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
+    expect(isFileTracked(dir, "NEXT_SESSION.md")).toBe(true);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("isFileTracked returns false for an untracked file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gitignore-tracked-false-"));
+  const fx = gitInitClean(dir);
+  try {
+    writeFileSync(join(dir, "NEXT_SESSION.md"), "handoff");
+    // Never `git add`ed → untracked
+    expect(isFileTracked(dir, "NEXT_SESSION.md")).toBe(false);
   } finally {
     fx.cleanup();
   }
