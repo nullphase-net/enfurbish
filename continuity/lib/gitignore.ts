@@ -42,3 +42,12 @@ export function getIgnoredDirs(projectRoot: string): Set<string> {
   }
   return out;
 }
+
+/**
+ * `git check-ignore -q <relPath>` returns exit 0 iff the path is gitignored.
+ * Returns false on any other exit (including non-git-repo, file not present, etc.).
+ */
+export function isFileIgnored(projectRoot: string, relPath: string): boolean {
+  const r = git(projectRoot, ["check-ignore", "-q", "--", relPath]);
+  return r.code === 0;
+}

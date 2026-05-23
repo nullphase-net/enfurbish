@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getIgnoredDirs } from "../lib/gitignore";
+import { getIgnoredDirs, isFileIgnored } from "../lib/gitignore";
 import { gitInitClean } from "./helpers/git";
 
 test("getIgnoredDirs returns empty Set outside a git repo", () => {
@@ -55,6 +55,30 @@ test("getIgnoredDirs handles nested .gitignore inside an already-ignored dir", (
     expect(ignored.has(join(dir, ".venv"))).toBe(true);
     expect(ignored.has(join(dir, ".venv", "x.pyc"))).toBe(false);
     expect(ignored.has(join(dir, ".venv", "y.py"))).toBe(false);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("isFileIgnored returns true when the file is in .gitignore", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gitignore-iisignored-true-"));
+  const fx = gitInitClean(dir);
+  try {
+    writeFileSync(join(dir, ".gitignore"), "NEXT_SESSION.md\n");
+    writeFileSync(join(dir, "NEXT_SESSION.md"), "handoff");
+    expect(isFileIgnored(dir, "NEXT_SESSION.md")).toBe(true);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("isFileIgnored returns false when the file is not in .gitignore", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gitignore-iisignored-false-"));
+  const fx = gitInitClean(dir);
+  try {
+    writeFileSync(join(dir, ".gitignore"), "");
+    writeFileSync(join(dir, "NEXT_SESSION.md"), "handoff");
+    expect(isFileIgnored(dir, "NEXT_SESSION.md")).toBe(false);
   } finally {
     fx.cleanup();
   }
