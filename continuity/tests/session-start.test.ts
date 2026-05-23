@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { scanForNextSessions } from "../hooks/session-start";
+import { gitInitClean } from "./helpers/git";
 
 const SCRIPT = join(import.meta.dir, "..", "hooks", "session-start.ts");
 
@@ -155,4 +156,52 @@ test("scanForNextSessions skips dotdirs (e.g., .cache)", () => {
   const paths = found.map((f) => f.path);
   expect(paths).toContain(join(root, "NEXT_SESSION.md"));
   expect(paths).not.toContain(join(root, ".cache", "NEXT_SESSION.md"));
+});
+
+test("scanForNextSessions skips a gitignored directory", () => {
+  const root = mkdtempSync(join(tmpdir(), "scan-ignored-dir-"));
+  const fx = gitInitClean(root);
+  try {
+    writeFileSync(join(root, ".gitignore"), "dist/\n");
+    mkdirSync(join(root, "dist"));
+    writeFileSync(join(root, "dist", "NEXT_SESSION.md"), "inside ignored dir");
+    writeFileSync(join(root, "NEXT_SESSION.md"), "at root");
+    const found = scanForNextSessions(root);
+    const paths = found.map((f) => f.path);
+    expect(paths).toContain(join(root, "NEXT_SESSION.md"));
+    expect(paths).not.toContain(join(root, "dist", "NEXT_SESSION.md"));
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("scanForNextSessions still finds a gitignored NEXT_SESSION.md at root", () => {
+  // The filter prunes ignored *directories*, not ignored *files*. A handoff
+  // file that's gitignored at root must still be surfaced.
+  const root = mkdtempSync(join(tmpdir(), "scan-ignored-file-"));
+  const fx = gitInitClean(root);
+  try {
+    writeFileSync(join(root, ".gitignore"), "NEXT_SESSION.md\n");
+    writeFileSync(join(root, "NEXT_SESSION.md"), "should still be found");
+    const found = scanForNextSessions(root);
+    expect(found.map((f) => f.path)).toContain(join(root, "NEXT_SESSION.md"));
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("scanForNextSessions does NOT find NEXT_SESSION.md inside a gitignored dir", () => {
+  // Acknowledged edge case from the spec: if a user keeps a handoff inside
+  // a gitignored directory, the dir-prune skips it. Locking the behavior in.
+  const root = mkdtempSync(join(tmpdir(), "scan-handoff-in-ignored-"));
+  const fx = gitInitClean(root);
+  try {
+    writeFileSync(join(root, ".gitignore"), "coverage/\n");
+    mkdirSync(join(root, "coverage"));
+    writeFileSync(join(root, "coverage", "NEXT_SESSION.md"), "inside ignored dir");
+    const found = scanForNextSessions(root);
+    expect(found).toEqual([]);
+  } finally {
+    fx.cleanup();
+  }
 });

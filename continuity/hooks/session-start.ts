@@ -2,6 +2,7 @@
 import { appendFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
+import { getIgnoredDirs } from "../lib/gitignore";
 
 const MAX_DEPTH = 4;
 const IGNORE_DIRS = new Set([
@@ -13,6 +14,7 @@ export type NextSessionFile = { path: string; mtimeMs: number };
 
 export function scanForNextSessions(root: string, maxDepth = MAX_DEPTH): NextSessionFile[] {
   const out: NextSessionFile[] = [];
+  const ignored = getIgnoredDirs(root);
   function walk(dir: string, depth: number) {
     if (depth > maxDepth) return;
     let entries;
@@ -25,10 +27,12 @@ export function scanForNextSessions(root: string, maxDepth = MAX_DEPTH): NextSes
       if (e.isSymbolicLink()) continue;
       const full = join(dir, e.name);
       if (e.isDirectory()) {
-        // Cheap-first pruning (per project invariant on ordering): name-based
-        // checks happen before any absolute-path allocation.
+        // Cheap-first ordering: name-based checks before the absolute-path
+        // Set lookup, which involves the `full` string we already built but
+        // would otherwise want to avoid for skipped dirs.
         if (e.name.startsWith(".")) continue;
         if (IGNORE_DIRS.has(e.name)) continue;
+        if (ignored.has(full)) continue;
         walk(full, depth + 1);
       } else if (e.isFile() && e.name === "NEXT_SESSION.md") {
         try {
