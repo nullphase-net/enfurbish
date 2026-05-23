@@ -144,6 +144,14 @@ Empty stdin is a no-op — the script will exit cleanly without touching the jou
 
 5. **If no file existed and you have no new items, do nothing.**
 
+6. **(Write path only) Capture a gitignore suggestion for the final report.** This step runs ONLY when this invocation actually wrote `NEXT_SESSION.md` — not when it was preserved-user-edited (step 1), removed (step 4 → empty), or absent (step 5). On the write path:
+
+   ```bash
+   SUGGEST=$(bun run "<skill-base-dir>/../../lib/gitignore.ts" --suggest-line NEXT_SESSION.md --for-write)
+   ```
+
+   On all other paths, leave `SUGGEST` empty (`SUGGEST=""`) or skip the call entirely. Calling without `--for-write` also returns empty — both forms are safe no-ops.
+
 Note in the retro's Handoff section which items carried forward, which were resolved, and which were added — so the user can audit your judgment.
 
 When writing, use this format:
@@ -189,7 +197,10 @@ After everything is written, output a short summary to the user:
   Journal:        ~/.claude/tooling-journal.md (appended)
   NEXT_SESSION:   <written|preserved|removed|absent>
   CLAUDE.md:      <none|user-confirmed|project-confirmed>
+$SUGGEST
 ```
+
+(If `$SUGGEST` is empty, the line collapses — no trailing blank lines in the report.)
 
 ## Confirmation policy
 

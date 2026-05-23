@@ -3,6 +3,8 @@ import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { scanForNextSessions } from "../hooks/session-start";
+import { gitInitClean } from "./helpers/git";
 
 const SCRIPT = join(import.meta.dir, "..", "hooks", "session-start.ts");
 
@@ -139,6 +141,97 @@ test("heads-up mode: no local file, siblings listed in banner", () => {
 
 test("emits empty JSON when CLAUDE_PROJECT_DIR points to a missing directory", () => {
   const res = runHook({ CLAUDE_PROJECT_DIR: "/no/such/path/exists" });
+  expect(res.status).toBe(0);
+  expect(res.stdout.trim()).toBe("{}");
+});
+
+test("scanForNextSessions skips dotdirs (e.g., .cache)", () => {
+  const root = mkdtempSync(join(tmpdir(), "scan-dotdir-"));
+  mkdirSync(join(root, ".cache"));
+  // A handoff in a dotdir must NOT be found.
+  writeFileSync(join(root, ".cache", "NEXT_SESSION.md"), "should be skipped");
+  // A handoff at the visible root MUST be found.
+  writeFileSync(join(root, "NEXT_SESSION.md"), "should be found");
+  const found = scanForNextSessions(root);
+  const paths = found.map((f) => f.path);
+  expect(paths).toContain(join(root, "NEXT_SESSION.md"));
+  expect(paths).not.toContain(join(root, ".cache", "NEXT_SESSION.md"));
+});
+
+test("scanForNextSessions skips a gitignored directory", () => {
+  const root = mkdtempSync(join(tmpdir(), "scan-ignored-dir-"));
+  const fx = gitInitClean(root);
+  try {
+    writeFileSync(join(root, ".gitignore"), "dist/\n");
+    mkdirSync(join(root, "dist"));
+    writeFileSync(join(root, "dist", "NEXT_SESSION.md"), "inside ignored dir");
+    writeFileSync(join(root, "NEXT_SESSION.md"), "at root");
+    const found = scanForNextSessions(root);
+    const paths = found.map((f) => f.path);
+    expect(paths).toContain(join(root, "NEXT_SESSION.md"));
+    expect(paths).not.toContain(join(root, "dist", "NEXT_SESSION.md"));
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("scanForNextSessions still finds a gitignored NEXT_SESSION.md at root", () => {
+  // The filter prunes ignored *directories*, not ignored *files*. A handoff
+  // file that's gitignored at root must still be surfaced.
+  const root = mkdtempSync(join(tmpdir(), "scan-ignored-file-"));
+  const fx = gitInitClean(root);
+  try {
+    writeFileSync(join(root, ".gitignore"), "NEXT_SESSION.md\n");
+    writeFileSync(join(root, "NEXT_SESSION.md"), "should still be found");
+    const found = scanForNextSessions(root);
+    expect(found.map((f) => f.path)).toContain(join(root, "NEXT_SESSION.md"));
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("scanForNextSessions does NOT find NEXT_SESSION.md inside a gitignored dir", () => {
+  // Acknowledged edge case from the spec: if a user keeps a handoff inside
+  // a gitignored directory, the dir-prune skips it. Locking the behavior in.
+  const root = mkdtempSync(join(tmpdir(), "scan-handoff-in-ignored-"));
+  const fx = gitInitClean(root);
+  try {
+    writeFileSync(join(root, ".gitignore"), "coverage/\n");
+    mkdirSync(join(root, "coverage"));
+    writeFileSync(join(root, "coverage", "NEXT_SESSION.md"), "inside ignored dir");
+    const found = scanForNextSessions(root);
+    expect(found).toEqual([]);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("slow-scan suffix appears when CONTINUITY_SLOW_MS=0 forces it (and a handoff is present)", () => {
+  const root = mkdtempSync(join(tmpdir(), "scan-slow-suffix-"));
+  // Create some directories that get walked so 'top:' has something to name.
+  mkdirSync(join(root, "src"));
+  mkdirSync(join(root, "src", "a"));
+  mkdirSync(join(root, "src", "b"));
+  writeFileSync(join(root, "NEXT_SESSION.md"), "handoff");
+  const res = spawnSync("bun", ["run", SCRIPT], {
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: root, CONTINUITY_SLOW_MS: "0" },
+  });
+  const json = JSON.parse(res.stdout);
+  expect(json.systemMessage).toContain("Continuity:");
+  expect(json.systemMessage).toContain("(slow scan:");
+  expect(json.systemMessage).toContain("dirs · top:");
+  expect(json.systemMessage).toMatch(/top: \.\/\S+ \d+ dirs/);
+});
+
+test("slow scan with no handoffs still emits {} (suffix-only invariant)", () => {
+  const root = mkdtempSync(join(tmpdir(), "scan-slow-empty-"));
+  mkdirSync(join(root, "src"));
+  // No NEXT_SESSION.md anywhere.
+  const res = spawnSync("bun", ["run", SCRIPT], {
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: root, CONTINUITY_SLOW_MS: "0" },
+  });
   expect(res.status).toBe(0);
   expect(res.stdout.trim()).toBe("{}");
 });
