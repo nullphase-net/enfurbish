@@ -30,7 +30,7 @@ Addresses three TODO items: "SessionStart scan should ignore .gitignore and hidd
 
 ### `continuity/lib/gitignore.ts` (new, ~50 LOC)
 
-Three exported functions and one CLI entry point. All shell out to `git` via `child_process.spawnSync(..., { timeout: 5000 })` (verified to honor the timeout in Bun), swallow errors, return safe defaults when git is unavailable or the directory isn't a repo.
+Three exported functions and one CLI entry point. All shell out to `git` via Node's `node:child_process.spawnSync(..., { timeout: 5000 })` (verified to honor the timeout in Bun runtime). **Use the Node-compat API explicitly — do not substitute `Bun.spawnSync` or `Bun.spawn`, which have a different timeout story.** Helpers swallow errors and return safe defaults when git is unavailable or the directory isn't a repo.
 
 ```ts
 export function getIgnoredDirs(projectRoot: string): Set<string>;
@@ -154,7 +154,9 @@ All git-querying paths degrade silently:
 
 All tests via `bun:test`, all fixtures via `mkdtempSync` + (where needed) `git init`.
 
-**Fixture isolation.** Every `git init` fixture sets `GIT_CONFIG_NOSYSTEM=1` and overrides `HOME` and `XDG_CONFIG_HOME` to the fixture's temp dir before running git. Without this, a developer's global git config (`init.templateDir`, `core.excludesFile`, global hooks) leaks into the fixture and tests become CI-flaky. The fixture helper exposes `gitInit(dir)` and `gitInitClean(dir)` (latter applies the env overrides explicitly).
+**Fixture isolation.** Every `git init` fixture sets `GIT_CONFIG_NOSYSTEM=1` and overrides `HOME` and `XDG_CONFIG_HOME` to the fixture's temp dir before running git. Without this, a developer's global git config (`init.templateDir`, `core.excludesFile`, global hooks) leaks into the fixture and tests become CI-flaky.
+
+**Fixture location:** the implementation plan must create `continuity/tests/helpers/git.ts` (new file) exporting `gitInitClean(dir: string): void` (and any per-call helpers needed). Both `gitignore.test.ts` and the new tests in `session-start.test.ts` import from there. Per the project's "plugins do not share lib code" invariant this helper stays inside `continuity/`; `affirm` keeps its own inline `gitInit` for `file-meta.test.ts` until/unless that work gets its own fixture-isolation pass.
 
 **`continuity/tests/gitignore.test.ts` (new) — ~9 tests:**
 - `getIgnoredDirs` returns empty Set outside a repo.
