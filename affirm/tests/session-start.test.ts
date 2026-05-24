@@ -11,7 +11,7 @@ function mkDir(prefix: string): string {
 
 const SCRIPT = join(import.meta.dir, "..", "hooks", "session-start.ts");
 
-function runHook(env: Record<string, string>, hashPath?: string) {
+function runHook(env: Record<string, string>, hashPath?: string, stdin?: string) {
   return spawnSync("bun", ["run", SCRIPT], {
     encoding: "utf8",
     env: {
@@ -19,6 +19,7 @@ function runHook(env: Record<string, string>, hashPath?: string) {
       ...env,
       ...(hashPath ? { HOME: hashPath } : {}),
     },
+    input: stdin,
   });
 }
 
@@ -109,6 +110,39 @@ test("emits {} when CLAUDE_PROJECT_DIR points to a missing dir", () => {
   const res = runHook({ CLAUDE_PROJECT_DIR: "/no/such/path/exists" });
   expect(res.status).toBe(0);
   expect(res.stdout.trim()).toBe("{}");
+});
+
+test("first fire emits banner, second fire with same session_id is suppressed", () => {
+  const home = mkDir("affirm-home-refire-");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const dir = mkDir("affirm-proj-refire-");
+  writeFileSync(join(dir, "CLAUDE.md"), "v1");
+  const stateDir = mkDir("affirm-firstfire-");
+  const sid = "test-session-affirm-refire";
+  const env = { CLAUDE_PROJECT_DIR: dir, HOME: home, AFFIRM_FIRSTFIRE_DIR: stateDir };
+
+  const res1 = runHook(env, undefined, JSON.stringify({ session_id: sid }));
+  expect(res1.status).toBe(0);
+  expect(JSON.parse(res1.stdout).systemMessage).toContain("Affirm:");
+
+  const res2 = runHook(env, undefined, JSON.stringify({ session_id: sid }));
+  expect(res2.status).toBe(0);
+  expect(res2.stdout.trim()).toBe("{}");
+});
+
+test("missing stdin or session_id does not suppress (best-effort)", () => {
+  const home = mkDir("affirm-home-nostdin-");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const dir = mkDir("affirm-proj-nostdin-");
+  writeFileSync(join(dir, "CLAUDE.md"), "v1");
+  const stateDir = mkDir("affirm-firstfire-nostdin-");
+  const env = { CLAUDE_PROJECT_DIR: dir, HOME: home, AFFIRM_FIRSTFIRE_DIR: stateDir };
+
+  const res1 = runHook(env);
+  expect(JSON.parse(res1.stdout).systemMessage).toContain("Affirm:");
+
+  const res2 = runHook(env, undefined, "not-json");
+  expect(JSON.parse(res2.stdout).systemMessage).toContain("Affirm:");
 });
 
 test("banner is prefixed with 'Affirm:'", () => {

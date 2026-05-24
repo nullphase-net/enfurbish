@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
-import { relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, relative } from "node:path";
 import { classify, collectInstructionFiles, loadHashes, normalizeProjectDir } from "../lib/affirm";
+import { markFirstFire } from "../lib/first-fire";
 
 export type BannerInput = {
   projectDir: string;
@@ -23,8 +26,38 @@ export function buildBanner(input: BannerInput): string {
   return msg.trimEnd();
 }
 
+/**
+ * Read SessionStart hook payload from stdin and pull out `session_id`.
+ * Best-effort: returns null on empty stdin, parse failure, or missing field.
+ * Never throws — the hook must remain best-effort and never block the session.
+ */
+function readSessionIdFromStdin(): string | null {
+  try {
+    const raw = readFileSync(0, "utf8");
+    if (!raw.trim()) return null;
+    const obj = JSON.parse(raw);
+    return typeof obj?.session_id === "string" ? obj.session_id : null;
+  } catch {
+    return null;
+  }
+}
+
+const DEFAULT_FIRSTFIRE_DIR = join(homedir(), ".claude", "state", "affirm-firstfire");
+
 if (import.meta.main) {
   try {
+    // Re-fire suppression: if we've already fired for this session_id, exit silently.
+    // Avoids the recurring "banner buried under N redundant SessionStart fires"
+    // failure logged across many wraps in the tooling journal.
+    const sessionId = readSessionIdFromStdin();
+    if (sessionId) {
+      const stateDir = process.env.AFFIRM_FIRSTFIRE_DIR || DEFAULT_FIRSTFIRE_DIR;
+      if (!markFirstFire(stateDir, sessionId)) {
+        process.stdout.write("{}\n");
+        process.exit(0);
+      }
+    }
+
     const projectDir = normalizeProjectDir(process.env.CLAUDE_PROJECT_DIR || process.cwd());
     const files = collectInstructionFiles(projectDir);
     if (files.length === 0) {

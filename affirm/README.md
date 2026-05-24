@@ -8,7 +8,7 @@ Every time a Claude Code session starts in a project with a `CLAUDE.md` or `.cla
 
 ## How it works
 
-- **SessionStart hook** computes SHA-256 of `<cwd>/CLAUDE.md` and every file under `<cwd>/.claude/rules/`, compares to hashes stored in `~/.claude/affirm-hashes.json`, and emits a `systemMessage` banner. The banner is the only output — instruction content is never injected into Claude's context.
+- **SessionStart hook** computes SHA-256 of `<cwd>/CLAUDE.md` and every file under `<cwd>/.claude/rules/`, compares to hashes stored in `~/.claude/affirm-hashes.json`, and emits a `systemMessage` banner. The banner is the only output — instruction content is never injected into Claude's context. The hook also dedupes re-fires per `session_id` (markers at `~/.claude/state/affirm-firstfire/`, pruned after 7 days) so Claude Code's multi-fire lifecycle (startup, resume, /clear, /compact) doesn't surface the banner ten times in one session.
 - **`/affirm` skill** wraps a small CLI that records, shows, or revokes hashes for the current cwd.
 
 ## Banner format
