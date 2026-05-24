@@ -28,6 +28,8 @@ Parse the JSON. If `ok: false`, note `degraded: true, reason: "..."` and proceed
 
 **Buffering note:** Claude Code may buffer transcript writes, so the last few events (including the `/wrap` call itself) may not appear in the count. If `session_end` from `scan.ts` is more than ~60s behind the current wall-clock time, mention "stats trail by ~Ns" in the journal entry under the relevant tool — otherwise the count silently undercounts.
 
+**Compaction note:** If `compaction_count > 0`, the current jsonl is a post-compaction segment and `turn_count` counts ONLY turns after the last compaction. State this explicitly in the retro (`Turns: N user / N model (since last of K compactions)`) so future readers don't take the counts at face value.
+
 ### 2. Pull cross-session journal context
 
 For each tool key in `tools` and `mcp` from scan output, grep recent journal blocks:

@@ -8,10 +8,11 @@ import { gitInitClean } from "./helpers/git";
 
 const SCRIPT = join(import.meta.dir, "..", "hooks", "session-start.ts");
 
-function runHook(env: Record<string, string>) {
+function runHook(env: Record<string, string>, stdin?: string) {
   return spawnSync("bun", ["run", SCRIPT], {
     encoding: "utf8",
     env: { ...process.env, ...env },
+    input: stdin,
   });
 }
 
@@ -120,7 +121,8 @@ test("banner lists siblings alongside local handoff", () => {
   expect(msg).toContain("2 sibling handoffs also found");
   expect(msg).toContain("frontend/NEXT_SESSION.md");
   expect(msg).toContain("api/NEXT_SESSION.md");
-  expect(msg).toMatch(/modified \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+  // Delta format: "<1s ago" for files freshly written, or "Ns ago", "Nm Ns ago", etc.
+  expect(msg).toMatch(/(modified (<1s|\d+[smhd]( \d+[smhd])?) ago)/);
 });
 
 test("heads-up mode: no local file, siblings listed in banner", () => {
@@ -222,6 +224,58 @@ test("slow-scan suffix appears when CONTINUITY_SLOW_MS=0 forces it (and a handof
   expect(json.systemMessage).toContain("(slow scan:");
   expect(json.systemMessage).toContain("dirs · top:");
   expect(json.systemMessage).toMatch(/top: \.\/\S+ \d+ dirs/);
+});
+
+test("first fire emits banner, second fire with same session_id is suppressed", () => {
+  const root = mkdtempSync(join(tmpdir(), "continuity-refire-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "continuity-refire-state-"));
+  writeFileSync(join(root, "NEXT_SESSION.md"), "handoff");
+  const sid = "test-session-refire";
+  const env = { CLAUDE_PROJECT_DIR: root, CONTINUITY_FIRSTFIRE_DIR: stateDir };
+
+  // First fire: full banner.
+  const res1 = runHook(env, JSON.stringify({ session_id: sid }));
+  expect(res1.status).toBe(0);
+  const json1 = JSON.parse(res1.stdout);
+  expect(json1.systemMessage).toContain("NEXT_SESSION.md present");
+
+  // Second fire with same session_id: suppressed.
+  const res2 = runHook(env, JSON.stringify({ session_id: sid }));
+  expect(res2.status).toBe(0);
+  expect(res2.stdout.trim()).toBe("{}");
+});
+
+test("different session_id is not suppressed", () => {
+  const root = mkdtempSync(join(tmpdir(), "continuity-refire-distinct-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "continuity-refire-distinct-state-"));
+  writeFileSync(join(root, "NEXT_SESSION.md"), "handoff");
+  const env = { CLAUDE_PROJECT_DIR: root, CONTINUITY_FIRSTFIRE_DIR: stateDir };
+
+  const res1 = runHook(env, JSON.stringify({ session_id: "alpha" }));
+  const res2 = runHook(env, JSON.stringify({ session_id: "beta" }));
+  expect(JSON.parse(res1.stdout).systemMessage).toContain("NEXT_SESSION.md present");
+  expect(JSON.parse(res2.stdout).systemMessage).toContain("NEXT_SESSION.md present");
+});
+
+test("missing stdin or session_id does not suppress (best-effort)", () => {
+  // If the harness doesn't pass session_id we can't dedupe; emit normally
+  // so the user still gets the banner.
+  const root = mkdtempSync(join(tmpdir(), "continuity-refire-nostdin-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "continuity-refire-nostdin-state-"));
+  writeFileSync(join(root, "NEXT_SESSION.md"), "handoff");
+  const env = { CLAUDE_PROJECT_DIR: root, CONTINUITY_FIRSTFIRE_DIR: stateDir };
+
+  // No stdin at all.
+  const res1 = runHook(env);
+  expect(JSON.parse(res1.stdout).systemMessage).toContain("NEXT_SESSION.md present");
+
+  // Malformed stdin.
+  const res2 = runHook(env, "not-json");
+  expect(JSON.parse(res2.stdout).systemMessage).toContain("NEXT_SESSION.md present");
+
+  // Valid JSON but no session_id field.
+  const res3 = runHook(env, JSON.stringify({ source: "startup" }));
+  expect(JSON.parse(res3.stdout).systemMessage).toContain("NEXT_SESSION.md present");
 });
 
 test("slow scan with no handoffs still emits {} (suffix-only invariant)", () => {

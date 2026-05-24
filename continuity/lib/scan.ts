@@ -90,6 +90,12 @@ export type ScanOk = {
   tools: Record<string, { calls: number; errors: number }>;
   mcp: Record<string, { calls: number; errors: number }>;
   hooks: Record<string, { fired: number }>;
+  /**
+   * Number of `system.compact_boundary` events in this transcript segment.
+   * Non-zero means turn_count is undercount: the recorded jsonl is the
+   * post-compaction segment and pre-compaction turns are not present.
+   */
+  compaction_count: number;
   skills_invoked: string[];
   files_edited: string[];
   files_read_count: number;
@@ -114,6 +120,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
   let filesReadCount = 0;
   let userTurns = 0;
   let modelTurns = 0;
+  let compactionCount = 0;
   // tool_use_id → "tools" or "mcp" + name, so we can credit errors back.
   const inflight = new Map<string, { bucket: "tools" | "mcp"; name: string }>();
 
@@ -146,6 +153,11 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
       const ev: string = obj.attachment.hookEvent;
       hooks[ev] = hooks[ev] ?? { fired: 0 };
       hooks[ev].fired++;
+      continue;
+    }
+
+    if (obj.type === "system" && obj.subtype === "compact_boundary") {
+      compactionCount++;
       continue;
     }
 
@@ -227,6 +239,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
     tools,
     mcp,
     hooks,
+    compaction_count: compactionCount,
     skills_invoked: [...skillsSet],
     files_edited,
     files_read_count: filesReadCount,

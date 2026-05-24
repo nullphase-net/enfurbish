@@ -164,6 +164,24 @@ test("parseTranscript on truncated input returns degraded result", async () => {
   expect(typeof r.reason).toBe("string"); // no cast needed — degraded/reason are typed on ScanOk
 });
 
+test("parseTranscript reports compaction_count = 0 when no compactions", async () => {
+  const r = await parseTranscript(FIXTURE);
+  expect(r.compaction_count).toBe(0);
+});
+
+test("parseTranscript counts compact_boundary system events", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "wrap-compact-"));
+  const f = join(tmp, "x.jsonl");
+  writeFileSync(f, [
+    JSON.stringify({ type: "user", cwd: "/x", timestamp: "2026-05-10T10:00:00.000Z", sessionId: "sid", message: { role: "user", content: [{ type: "text", text: "a" }] } }),
+    JSON.stringify({ type: "system", subtype: "compact_boundary", timestamp: "2026-05-10T10:30:00.000Z", sessionId: "sid", content: "Conversation compacted" }),
+    JSON.stringify({ type: "user", cwd: "/x", timestamp: "2026-05-10T11:00:00.000Z", sessionId: "sid", message: { role: "user", content: [{ type: "text", text: "b" }] } }),
+    JSON.stringify({ type: "system", subtype: "compact_boundary", timestamp: "2026-05-10T12:00:00.000Z", sessionId: "sid", content: "Conversation compacted" }),
+  ].join("\n") + "\n");
+  const r = await parseTranscript(f);
+  expect(r.compaction_count).toBe(2);
+});
+
 test("parseTranscript caps files_edited at 50, prefers most-recent", async () => {
   const tmp = mkdtempSync(join(tmpdir(), "wrap-cap-"));
   const f = join(tmp, "x.jsonl");

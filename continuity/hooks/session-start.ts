@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
-import { appendFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
 import { getIgnoredDirs } from "../lib/gitignore";
+import { humanizeDelta } from "../lib/humanize";
+import { markFirstFire } from "../lib/first-fire";
 
 const MAX_DEPTH = 4;
 const IGNORE_DIRS = new Set([
@@ -75,15 +77,17 @@ export function findProjectRoot(start: string): string {
   }
 }
 
-function fmtTs(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 16).replace("T", " ");
+function fmtAge(mtimeMs: number, now: number): string {
+  return `${humanizeDelta(now - mtimeMs)} ago`;
 }
 
 export function buildBanner(opts: {
   sessionCwd: string;
   projectRoot: string;
   files: NextSessionFile[];
+  now?: number;
 }): string | null {
+  const now = opts.now ?? Date.now();
   const localPath = join(opts.sessionCwd, "NEXT_SESSION.md");
   const local = opts.files.find(f => f.path === localPath);
   const siblings = opts.files.filter(f => f.path !== localPath);
@@ -91,11 +95,11 @@ export function buildBanner(opts: {
   if (!local && siblings.length === 0) return null;
 
   if (local) {
-    let msg = `Continuity: NEXT_SESSION.md present from your last wrap (modified ${fmtTs(local.mtimeMs)} UTC). Run /next to pick it up.`;
+    let msg = `Continuity: NEXT_SESSION.md present from your last wrap (modified ${fmtAge(local.mtimeMs, now)}). Run /next to pick it up.`;
     if (siblings.length > 0) {
       msg += ` ${siblings.length} sibling handoff${siblings.length === 1 ? "" : "s"} also found:`;
       for (const s of siblings) {
-        msg += `\n  - ${relative(opts.projectRoot, s.path)}  (modified ${fmtTs(s.mtimeMs)})`;
+        msg += `\n  - ${relative(opts.projectRoot, s.path)}  (modified ${fmtAge(s.mtimeMs, now)})`;
       }
     }
     return msg;
@@ -103,10 +107,28 @@ export function buildBanner(opts: {
 
   let msg = `Continuity: no NEXT_SESSION.md in this cwd, but ${siblings.length} handoff${siblings.length === 1 ? "" : "s"} in sibling dirs:`;
   for (const s of siblings) {
-    msg += `\n  - ${relative(opts.projectRoot, s.path)}  (modified ${fmtTs(s.mtimeMs)})`;
+    msg += `\n  - ${relative(opts.projectRoot, s.path)}  (modified ${fmtAge(s.mtimeMs, now)})`;
   }
   return msg;
 }
+
+/**
+ * Read SessionStart hook payload from stdin and pull out `session_id`.
+ * Best-effort: returns null on empty stdin, parse failure, or missing field.
+ * Never throws — the hook must remain best-effort and never block the session.
+ */
+function readSessionIdFromStdin(): string | null {
+  try {
+    const raw = readFileSync(0, "utf8");
+    if (!raw.trim()) return null;
+    const obj = JSON.parse(raw);
+    return typeof obj?.session_id === "string" ? obj.session_id : null;
+  } catch {
+    return null;
+  }
+}
+
+const DEFAULT_FIRSTFIRE_DIR = join(homedir(), ".claude", "state", "continuity-firstfire");
 
 function formatSlowNote(elapsedMs: number, walks: Map<string, number>): string {
   const totalDirs = Array.from(walks.values()).reduce((a, b) => a + b, 0);
@@ -131,6 +153,19 @@ function debugLog(line: string) {
 
 if (import.meta.main) {
   try {
+    // Re-fire suppression: if we've already fired for this session_id, exit silently.
+    // Avoids the recurring "briefing buried under N redundant SessionStart fires"
+    // failure logged across many wraps in the tooling journal.
+    const sessionId = readSessionIdFromStdin();
+    if (sessionId) {
+      const stateDir = process.env.CONTINUITY_FIRSTFIRE_DIR || DEFAULT_FIRSTFIRE_DIR;
+      if (!markFirstFire(stateDir, sessionId)) {
+        debugLog(`suppressed re-fire for session_id=${sessionId}`);
+        process.stdout.write("{}\n");
+        process.exit(0);
+      }
+    }
+
     const sessionCwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
     const projectRoot = findProjectRoot(sessionCwd);
     const { files, elapsedMs, walks } = scanForNextSessionsWithStats(projectRoot);

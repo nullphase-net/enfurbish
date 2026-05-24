@@ -36,9 +36,11 @@ The scan prunes hidden directories (any name starting with `.`) and gitignored d
 
 The hook is best-effort. Any error path emits `{}` and exits 0 — it never blocks the session.
 
+**Re-fire suppression:** Claude Code fires `SessionStart` on several lifecycle events (startup, resume, /clear, /compact). A single logical session can fire the hook 10+ times, drowning the banner in repeated noise. The hook reads `session_id` from its stdin payload, marks first-fire in `~/.claude/state/continuity-firstfire/<session_id>`, and exits silently (`{}`) on subsequent fires within 7 days. If the harness doesn't pass a session_id (e.g., older Claude Code), suppression is skipped and every fire emits — degrading to the prior behavior, never blocking.
+
 **Settings-watcher caveat:** if you install the hook into `~/.claude/settings.json` while a Claude Code session is already running, the hook won't fire in that session. Start a fresh `claude` process to pick it up.
 
-**Debug mode:** set `CONTINUITY_DEBUG=1` in the hook command in settings.json to append one line per invocation to `~/.claude/continuity-hook.log` (cwd, project root, file count, emit type). Useful for verifying the hook is being invoked and finding what it sees.
+**Debug mode:** set `CONTINUITY_DEBUG=1` in the hook command in settings.json to append one line per invocation to `~/.claude/continuity-hook.log` (cwd, project root, file count, emit type, whether the fire was suppressed). Useful for verifying the hook is being invoked and finding what it sees.
 
 ## What the tooling journal captures
 
@@ -67,9 +69,10 @@ Grep `^- Action:` to see the improvement backlog.
 The retro and journal entry are informed by `scan.ts`, which parses the current session's transcript at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`. It reports:
 
 - Session start/end timestamps and duration
-- User turn count vs model turn count
+- User turn count vs model turn count (post-compaction only when `compaction_count > 0` — see below)
 - Per-tool call counts and error counts, bucketed into `tools` (built-ins) vs `mcp` (`mcp__*` calls)
 - Hooks that fired during the session and how many times
+- `compaction_count` — number of `compact_boundary` events. Non-zero means turn counts are partial (everything before the last compaction is not in this transcript segment).
 - Skills invoked (via the `Skill` tool)
 - Files edited (most-recent first, capped at 50)
 - Number of files read
