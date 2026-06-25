@@ -75,6 +75,41 @@ test("bare invocation flags CHANGED after file mutation", () => {
   expect(io.out.join("\n")).toContain("CHANGED (hash mismatch)");
 });
 
+test("bare invocation shows @import provenance and depth", () => {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "base instructions, see @extra.md");
+  writeFileSync(join(dir, "extra.md"), "imported");
+  const io = collect();
+  runCli([], opts(dir, hashPath, io));
+  const out = io.out.join("\n");
+  expect(out).toContain("extra.md");
+  expect(out).toMatch(/import:\s+.*CLAUDE\.md/);
+  expect(out).toMatch(/depth 1/);
+});
+
+test("bare invocation flags out-of-tree imports", () => {
+  const { dir, hashPath } = mkProject();
+  const ext = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-cli-ext-")));
+  writeFileSync(join(ext, "shared.md"), "shared");
+  writeFileSync(join(dir, "CLAUDE.md"), `@${join(ext, "shared.md")}`);
+  const io = collect();
+  runCli([], opts(dir, hashPath, io));
+  expect(io.out.join("\n")).toMatch(/scope:\s+out-of-tree/);
+});
+
+test("bare invocation summarizes @imports beyond depth 2", () => {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "@a.md");
+  writeFileSync(join(dir, "a.md"), "@b.md");
+  writeFileSync(join(dir, "b.md"), "@c.md");
+  writeFileSync(join(dir, "c.md"), "deep");
+  const io = collect();
+  runCli([], opts(dir, hashPath, io));
+  const out = io.out.join("\n");
+  expect(out).toContain("beyond depth 2");
+  expect(out).toMatch(/b\.md → c\.md/);
+});
+
 test("--show is no longer recognized", () => {
   const { dir, hashPath } = mkProject();
   writeFileSync(join(dir, "CLAUDE.md"), "rules");

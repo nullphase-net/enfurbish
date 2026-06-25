@@ -1,14 +1,14 @@
 #!/usr/bin/env bun
-import { relative } from "node:path";
+import { dirname, relative } from "node:path";
 import {
   HASH_FILE,
   approveAll,
-  collectInstructionFiles,
   loadHashes,
   normalizeProjectDir,
   revokeProject,
   sha256OfFile,
 } from "./affirm";
+import { buildInstructionGraph, displayPath, type InstructionGraph } from "./imports";
 import { getMtime, getGitInfo, type GitInfo } from "./file-meta";
 
 function usage(): string {
@@ -36,19 +36,26 @@ function fmtGit(info: GitInfo): string | null {
 
 function renderDetails(
   projectDir: string,
-  files: string[],
+  graph: InstructionGraph,
   stored: Record<string, string>,
   out: (s: string) => void,
 ) {
   out(`Instruction files in ${projectDir}:`);
   out("");
-  for (const f of files) {
-    out(`  ${relative(projectDir, f)}`);
-    out(`    status:   ${statusOf(f, stored)}`);
-    const mt = getMtime(f);
+  for (const gf of graph.files) {
+    out(`  ${displayPath(projectDir, gf.path)}`);
+    out(`    status:   ${statusOf(gf.path, stored)}`);
+    const mt = getMtime(gf.path);
     if (mt !== null) out(`    modified: ${fmtTs(mt)}`);
-    const git = fmtGit(getGitInfo(projectDir, f));
+    const git = fmtGit(getGitInfo(dirname(gf.path), gf.path)); // cwd = file's dir → correct repo, incl. out-of-tree
     if (git !== null) out(`    git:      ${git}`);
+    if (gf.via) out(`    import:   from ${displayPath(projectDir, gf.via)} (depth ${gf.depth})`);
+    if (gf.outOfTree) out(`    scope:    out-of-tree`);
+    out("");
+  }
+  if (graph.deep.length > 0) {
+    const list = graph.deep.map((d) => `${displayPath(projectDir, d.via)} → ${d.raw}`).join(", ");
+    out(`@imports beyond depth 2 (not tracked): ${list}`);
     out("");
   }
   out("Run /affirm -a to record current hashes, /affirm -r to revoke.");
@@ -90,8 +97,8 @@ export function runCli(argv: string[], opts: CliOpts): number {
 
   const hashPath = opts.hashPath ?? HASH_FILE;
   const projectDir = normalizeProjectDir(opts.cwd);
-  const files = collectInstructionFiles(projectDir);
-  if (files.length === 0) {
+  const graph = buildInstructionGraph(projectDir);
+  if (graph.files.length === 0) {
     opts.out(`No CLAUDE.md or .claude/rules/ files found in ${projectDir}`);
     return 0;
   }
@@ -119,7 +126,7 @@ export function runCli(argv: string[], opts: CliOpts): number {
   }
 
   if (arg === undefined) {
-    renderDetails(projectDir, files, loadHashes(hashPath), opts.out);
+    renderDetails(projectDir, graph, loadHashes(hashPath), opts.out);
     return 0;
   }
 

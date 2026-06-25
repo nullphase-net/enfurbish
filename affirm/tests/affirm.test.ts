@@ -55,6 +55,15 @@ test("collectInstructionFiles skips symlinks under .claude/rules/", () => {
   expect(files).toEqual([join(dir, ".claude", "rules", "real.md")]);
 });
 
+test("collectInstructionFiles follows @imports in CLAUDE.md", () => {
+  const { dir } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "base instructions, see @extra.md");
+  writeFileSync(join(dir, "extra.md"), "imported instructions");
+  const files = collectInstructionFiles(dir);
+  expect(files).toContain(join(dir, "CLAUDE.md"));
+  expect(files).toContain(join(dir, "extra.md"));
+});
+
 test("loadHashes returns {} when file missing or unparseable", () => {
   const { hashPath } = mkProject();
   expect(loadHashes(hashPath)).toEqual({});

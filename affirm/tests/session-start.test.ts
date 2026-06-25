@@ -4,6 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { approveAll, normalizeProjectDir, saveHashes, sha256OfFile } from "../lib/affirm";
+import { buildBanner, type FileMeta } from "../hooks/session-start";
+
+function fileMeta(over: Partial<FileMeta> = {}): FileMeta {
+  return {
+    depth: 0,
+    via: null,
+    outOfTree: false,
+    mtimeMs: 1000,
+    git: { inRepo: false, lastCommit: null, dirty: false },
+    ...over,
+  };
+}
 
 function mkDir(prefix: string): string {
   return normalizeProjectDir(mkdtempSync(join(tmpdir(), prefix)));
@@ -22,6 +34,74 @@ function runHook(env: Record<string, string>, hashPath?: string, stdin?: string)
     input: stdin,
   });
 }
+
+test("buildBanner shows modified + git detail for CHANGED files", () => {
+  const f = "/proj/CLAUDE.md";
+  const msg = buildBanner({
+    projectDir: "/proj",
+    classification: { approved: [], added: [], changed: [f] },
+    meta: { [f]: fileMeta({ mtimeMs: 0, git: { inRepo: true, lastCommit: { author: "Eve", date: "2026-01-01T00:00:00Z" }, dirty: false } }) },
+    deep: [],
+    now: 3 * 86400_000,
+  });
+  expect(msg).toContain("✧ CLAUDE.md  [CHANGED — unaffirmed]");
+  expect(msg).toContain("modified 3d ago");
+  expect(msg).toContain("Eve");
+  expect(msg).toContain("2026-01-01");
+});
+
+test("buildBanner keeps affirmed files terse (no detail line)", () => {
+  const f = "/proj/CLAUDE.md";
+  const msg = buildBanner({
+    projectDir: "/proj",
+    classification: { approved: [f], added: [], changed: [] },
+    meta: { [f]: fileMeta() },
+    deep: [],
+    now: 1000,
+  });
+  expect(msg).toContain("✓ CLAUDE.md");
+  expect(msg).not.toContain("modified");
+});
+
+test("buildBanner annotates imported + out-of-tree provenance", () => {
+  const f = "/elsewhere/shared.md";
+  const msg = buildBanner({
+    projectDir: "/proj",
+    classification: { approved: [], added: [f], changed: [] },
+    meta: { [f]: fileMeta({ via: "/proj/CLAUDE.md", outOfTree: true, depth: 1 }) },
+    deep: [],
+    now: 2000,
+  });
+  expect(msg).toContain("@from CLAUDE.md");
+  expect(msg).toContain("out-of-tree");
+});
+
+test("buildBanner summarizes @imports beyond depth 2", () => {
+  const f = "/proj/CLAUDE.md";
+  const msg = buildBanner({
+    projectDir: "/proj",
+    classification: { approved: [f], added: [], changed: [] },
+    meta: { [f]: fileMeta() },
+    deep: [{ via: "/proj/b.md", raw: "c.md" }],
+    now: 1000,
+  });
+  expect(msg).toContain("beyond depth 2");
+  expect(msg).toContain("b.md → c.md");
+});
+
+test("hook banner includes modified detail for a NEW file (end-to-end)", () => {
+  const home = mkDir("affirm-home-detail-");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const dir = mkDir("affirm-proj-detail-");
+  writeFileSync(join(dir, "CLAUDE.md"), "v1");
+  const res = spawnSync("bun", ["run", SCRIPT], {
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home },
+  });
+  const json = JSON.parse(res.stdout);
+  expect(json.systemMessage).toContain("✦ CLAUDE.md  [NEW — unaffirmed]");
+  expect(json.systemMessage).toContain("modified");
+});
 
 test("emits {} when no instruction files exist", () => {
   const dir = mkDir("affirm-hook-");
