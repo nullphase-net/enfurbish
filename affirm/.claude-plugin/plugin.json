@@ -1,7 +1,7 @@
 {
   "name": "affirm",
-  "description": "Approval gate for project instructions. Surfaces new or modified CLAUDE.md and .claude/rules/* files at session start; the user explicitly affirms them before Claude treats them as trusted.",
-  "version": "0.3.0",
+  "description": "Approval gate for project instructions. Surfaces new or modified CLAUDE.md, .claude/rules/* files, and the files they @import at session start; the user explicitly affirms them before Claude treats them as trusted.",
+  "version": "0.4.0",
   "license": "MIT",
   "keywords": ["security", "prompt-injection", "claudemd", "approval", "guard"]
 }

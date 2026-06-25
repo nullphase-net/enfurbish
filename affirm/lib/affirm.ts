@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, renameSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
+import { buildInstructionGraph } from "./imports";
 
 export const HASH_FILE = join(homedir(), ".claude", "affirm-hashes.json");
 
@@ -24,32 +25,13 @@ export function sha256OfFile(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+// Roots (CLAUDE.md + .claude/rules/**) plus any files they @import, transitively.
+// The full graph (depth/provenance/out-of-tree) lives in ./imports; classify/approve/
+// revoke only need the flat path list.
 export function collectInstructionFiles(projectDir: string): string[] {
-  const root = normalizeProjectDir(projectDir);
-  const out: string[] = [];
-  const top = join(root, "CLAUDE.md");
-  if (existsSync(top) && statSync(top).isFile()) out.push(top);
-
-  const rulesDir = join(root, ".claude", "rules");
-  if (existsSync(rulesDir) && statSync(rulesDir).isDirectory()) {
-    walkRules(rulesDir, out);
-  }
-  return out.sort();
-}
-
-function walkRules(dir: string, out: string[]) {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const e of entries) {
-    if (e.isSymbolicLink()) continue;
-    const full = join(dir, e.name);
-    if (e.isDirectory()) walkRules(full, out);
-    else if (e.isFile()) out.push(full);
-  }
+  return buildInstructionGraph(projectDir)
+    .files.map((f) => f.path)
+    .sort();
 }
 
 export function loadHashes(path: string = HASH_FILE): Record<string, string> {
