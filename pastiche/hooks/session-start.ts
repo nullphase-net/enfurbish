@@ -14,8 +14,12 @@ function debugLog(line: string) {
 
 export function buildOutput(pluginRoot: string): string | null {
   const cfg = loadConfig();
-  if (!existsSync(cfg.ledger)) return null;
-  const due = stalest(parseLedger(readFileSync(cfg.ledger, "utf8")), cfg.due);
+  // The gate is configured languages, not the ledger. With nothing to teach,
+  // stay silent; with something to teach but no ledger yet, teach and let the
+  // session start the file. Otherwise a fresh install never learns anything.
+  if (!cfg.languages.length) return null;
+  const text = existsSync(cfg.ledger) ? readFileSync(cfg.ledger, "utf8") : "";
+  const due = stalest(parseLedger(text), cfg.due);
   return buildContext({ cfg, due, notes: loadNotes(pluginRoot, cfg), pluginRoot });
 }
 

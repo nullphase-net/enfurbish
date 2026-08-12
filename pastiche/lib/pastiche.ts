@@ -4,7 +4,14 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
 export type Language = { code: string; name: string; domains: string };
-export type Config = { ledger: string; languages: Language[]; due: number };
+export type Config = {
+  ledger: string;
+  languages: Language[];
+  /** Stale items re-surfaced per session. */
+  due: number;
+  /** New items introduced per session. 0 turns introduction off entirely. */
+  fresh: number;
+};
 export type Entry = {
   line: string;
   code: string;
@@ -25,7 +32,7 @@ export function expandTilde(p: string): string {
 }
 
 export function loadConfig(dir = pasticheDir()): Config {
-  const fallback: Config = { ledger: join(dir, "ledger.md"), languages: [], due: 5 };
+  const fallback: Config = { ledger: join(dir, "ledger.md"), languages: [], due: 5, fresh: 2 };
   const path = join(dir, "config.json");
   if (!existsSync(path)) return fallback;
   try {
@@ -34,6 +41,7 @@ export function loadConfig(dir = pasticheDir()): Config {
       ledger: typeof raw.ledger === "string" ? expandTilde(raw.ledger) : fallback.ledger,
       languages: Array.isArray(raw.languages) ? raw.languages : fallback.languages,
       due: Number.isFinite(raw.due) ? raw.due : fallback.due,
+      fresh: Number.isFinite(raw.fresh) ? raw.fresh : fallback.fresh,
     };
   } catch {
     // Malformed config must not break the session — fall back to defaults.
@@ -102,37 +110,48 @@ export function buildContext(opts: {
     : "- (none configured — see the plugin README)";
   const dueList = due.length
     ? due.map(e => `  - ${e.code}: ${e.term}  [last surfaced ${e.seen}]`).join("\n")
-    : "  (ledger empty — introduce a first item when the work gives you an opening)";
+    : "  (nothing due yet — the ledger is empty or not created; the first terms you\n" +
+      "   introduce start it)";
+  const freshRule = cfg.fresh > 0
+    ? `\nIntroduce up to ${cfg.fresh} new term${cfg.fresh === 1 ? "" : "s"} per session, drawn from what the work is
+actually about. Append each to the ledger. This budget is separate from the due
+list — reinforcement never crowds it out. No natural opening, though, means
+spend less; filler is worse than silence.\n`
+    : "";
 
   return `# pastiche — ambient language infusion
 
 Weave a few terms per session into your responses, tied to whatever the work
-actually is, plus a one-line bilingual recap when something is finished.
-Steady drip, not quizzing. Never turn the session into a lesson.
+actually is. Steady drip, not quizzing. Never turn the session into a lesson.
 
 Languages, and when to reach for each:
 ${langs}
+
+Re-surface the due items listed below — that is what the learner is forgetting
+right now. Re-teach without ceremony; forgetting is expected, not a failure.
+${freshRule}
+When the learner uses a term themselves, unprompted, they are priming you:
+- Already in the ledger → append a ✓ to its line and restamp it.
+- Not in the ledger → they already have it. Append it with a ✓. Confirm or
+  correct in a clause and move on; never teach it back at them.
 
 Non-Latin scripts: always script + informal phonetic romanization + gloss —
 ទឹក (teuk) — water. Romanization is load-bearing; use informal phonetic
 romanization, not academic transliteration.
 Idioms and proverbs: literal translation AND actual meaning, always.
-When the user writes in one of these languages, give brief feedback — confirm
-or correct in a clause, then move on.
 
-The learner will forget — expect it, and re-surface earlier items unprompted
-rather than piling on new ones. Re-teach without ceremony when something
-already covered comes up again; ✓ marks fade.
+When something is finished, close with a one-line recap: one target language,
+then its English translation. Target language + English — never two target
+languages, and never the target language alone.
 ${notes}
 Ledger: ${cfg.ledger}
 
-Due for re-surfacing (stalest first — work these in before introducing new vocab):
+Due for re-surfacing (stalest first):
 ${dueList}
 
 After using an item, restamp it so it rotates out:
   bun run ${join(pluginRoot, "lib", "pastiche.ts")} --seen "<term>"
-New item? Append: \`- <code>: <term> — <gloss> | <today> | seen: <today>\`
-Append a ✓ to a line when the user uses that item correctly, unprompted.`;
+Append a new or primed item: \`- <code>: <term> — <gloss> | <today> | seen: <today>\``;
 }
 
 /** Read `languages/<code>.md` for each configured language, concatenated. */

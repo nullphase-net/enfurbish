@@ -21,10 +21,26 @@ async function runHook(pasticheDir: string): Promise<{ stdout: string; code: num
 }
 
 describe("session-start hook", () => {
-  test("emits empty JSON when there is no ledger", async () => {
+  // The gate is configured languages, not the ledger file. Nothing to teach
+  // means silence; something to teach but nowhere to write it yet does not.
+  test("emits empty JSON when no languages are configured", async () => {
     const { stdout, code } = await runHook(freshDir());
     expect(code).toBe(0);
     expect(JSON.parse(stdout)).toEqual({});
+  });
+
+  test("still teaches when languages are configured but the ledger is missing", async () => {
+    const dir = freshDir();
+    writeFileSync(join(dir, "config.json"), JSON.stringify({
+      ledger: join(dir, "nope", "ledger.md"),
+      languages: [{ code: "km", name: "Khmer", domains: "everyday" }],
+    }));
+
+    const { stdout, code } = await runHook(dir);
+    expect(code).toBe(0);
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext;
+    expect(ctx).toContain("nothing due yet");
+    expect(ctx).toContain("Introduce up to 2 new term");
   });
 
   test("injects additionalContext with due items when a ledger exists", async () => {

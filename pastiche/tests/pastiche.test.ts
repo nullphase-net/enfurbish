@@ -89,6 +89,7 @@ describe("loadConfig", () => {
   test("defaults when there is no config file", () => {
     const cfg = loadConfig(freshDir());
     expect(cfg.due).toBe(5);
+    expect(cfg.fresh).toBe(2);
     expect(cfg.languages).toEqual([]);
     expect(cfg.ledger).toEndWith("ledger.md");
   });
@@ -97,6 +98,13 @@ describe("loadConfig", () => {
     const dir = freshDir();
     writeFileSync(join(dir, "config.json"), "{ not json");
     expect(loadConfig(dir).due).toBe(5);
+    expect(loadConfig(dir).fresh).toBe(2);
+  });
+
+  test("fresh can be set to 0 to turn off new vocabulary", () => {
+    const dir = freshDir();
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ fresh: 0 }));
+    expect(loadConfig(dir).fresh).toBe(0);
   });
 
   test("expands ~ in the ledger path", () => {
@@ -112,6 +120,7 @@ describe("buildContext", () => {
   const cfg = {
     ledger: "/tmp/ledger.md",
     due: 2,
+    fresh: 2,
     languages: [{ code: "km", name: "Khmer", domains: "everyday, family" }],
   };
 
@@ -125,23 +134,48 @@ describe("buildContext", () => {
     expect(out).toContain("/plugins/pastiche/lib/pastiche.ts");
   });
 
-  test("an empty ledger still produces usable guidance", () => {
+  test("an empty ledger asks for a first batch instead of going quiet", () => {
     const out = buildContext({ cfg, due: [], notes: "", pluginRoot: "/p" });
-    expect(out).toContain("ledger empty");
+    expect(out).toContain("nothing due yet");
+    expect(out).toContain("/tmp/ledger.md");
+  });
+
+  test("states the new-term budget, and drops the section when fresh is 0", () => {
+    const on = buildContext({ cfg, due: [], notes: "", pluginRoot: "/p" });
+    expect(on).toContain("Introduce up to 2 new term");
+
+    const off = buildContext({ cfg: { ...cfg, fresh: 0 }, due: [], notes: "", pluginRoot: "/p" });
+    expect(off).not.toContain("Introduce up to");
+  });
+
+  // The recap kept coming out km+es because "bilingual" reads as "the two
+  // languages I'm learning". The prompt has to name English explicitly.
+  test("pins the recap to target-language + English", () => {
+    const out = buildContext({ cfg, due: [], notes: "", pluginRoot: "/p" });
+    expect(out).toContain("English");
+    expect(out).not.toContain("bilingual");
+  });
+
+  test("does not suppress new vocabulary in favor of the due list", () => {
+    const out = buildContext({
+      cfg, due: stalest(parseLedger(LEDGER), 2), notes: "", pluginRoot: "/p",
+    });
+    expect(out).not.toContain("before introducing new vocab");
+    expect(out).not.toContain("rather than piling on new ones");
   });
 });
 
 describe("loadNotes", () => {
   test("reads the shipped language files for configured languages only", () => {
     const root = join(import.meta.dir, "..");
-    const km = loadNotes(root, { ledger: "", due: 5, languages: [{ code: "km", name: "Khmer", domains: "" }] });
+    const km = loadNotes(root, { ledger: "", due: 5, fresh: 2, languages: [{ code: "km", name: "Khmer", domains: "" }] });
     expect(km).toContain("aspiration");
     expect(km).not.toContain("cognates");
   });
 
   test("an unknown language code is skipped, not fatal", () => {
     const root = join(import.meta.dir, "..");
-    expect(loadNotes(root, { ledger: "", due: 5, languages: [{ code: "zz", name: "?", domains: "" }] }))
+    expect(loadNotes(root, { ledger: "", due: 5, fresh: 2, languages: [{ code: "zz", name: "?", domains: "" }] }))
       .toBe("");
   });
 });
