@@ -93,6 +93,40 @@ describe("--seen / --mark", () => {
     expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
   });
 
+  // Regression: restamping a line already stamped today is a no-op on the
+  // text, which the CLI used to report as "no match" — indistinguishable from
+  // a genuine miss, and it cost a real session two unrecorded items.
+  test("an already-current line is reported as current, not as a miss", () => {
+    const seed = `- km: ទឹក (teuk) — water | 2026-01-01 | seen: ${NOW}\n`;
+    const c = fixture(seed);
+    const said: string[] = [];
+    expect(main(["--seen", "teuk"], c, s => said.push(s))).toBe(0);
+    expect(said.join("\n")).toContain("already");
+    expect(said.join("\n")).not.toContain("no match");
+    expect(readFileSync(c.ledger, "utf8")).toBe(seed);
+  });
+
+  // Regression: ledger parentheticals carry pronunciation notes, so a needle
+  // built as "<script> (<romanization>)" is not a substring of the line.
+  test("a near miss names the line it almost matched", () => {
+    const seed = `- km: តូច (toch; family: "too", final ch unreleased) — small | 2026-01-01 | seen: 2026-01-01\n`;
+    const c = fixture(seed);
+    const said: string[] = [];
+    expect(main(["--seen", "តូច (toch)"], c, s => said.push(s))).toBe(0);
+    expect(said.join("\n")).toContain("no match");
+    expect(said.join("\n")).toContain("near:");
+    expect(said.join("\n")).toContain("តូច");
+  });
+
+  test("a needle hitting several lines says how many it changed", () => {
+    const c = fixture(
+      "- es: uno — one | 2026-01-01 | seen: 2026-01-01\n" +
+      "- es: uno más — one more | 2026-01-01 | seen: 2026-01-01\n");
+    const said: string[] = [];
+    main(["--seen", "uno"], c, s => said.push(s));
+    expect(said.join("\n")).toContain("2 lines");
+  });
+
   test("a missing ledger exits 0 rather than failing the session", () => {
     expect(main(["--seen", "teuk"], fixture())).toBe(0);
   });

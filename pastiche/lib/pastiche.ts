@@ -122,6 +122,16 @@ export function mark(text: string, needle: string, date: string): string {
     .join("\n");
 }
 
+/**
+ * Entry lines containing `needle`. The writers below rewrite exactly these, so
+ * the CLI uses it to tell "nothing matched" apart from "matched, already
+ * current" — a rewrite that changes no bytes is otherwise indistinguishable
+ * from a miss, and reporting it as one loses real state.
+ */
+export function matchingLines(text: string, needle: string): string[] {
+  return text.split("\n").filter(l => CODE.test(l) && l.includes(needle));
+}
+
 /** Render a ledger line. The only place the on-disk format is written. */
 export function formatEntry(code: string, body: string, date: string): string {
   return `- ${code}: ${body} | ${date} | seen: ${date}`;
@@ -214,9 +224,13 @@ const USAGE = `usage: pastiche.ts [--due <n>]
  * ponytail: "not found" exits 0 per repo convention — the caller is a session
  * reading stdout, not a shell branching on $?. Only arg misuse exits 2.
  */
-export function main(args: string[], cfg = loadConfig()): number {
+export function main(
+  args: string[],
+  cfg = loadConfig(),
+  emit: (s: string) => void = s => void process.stdout.write(`${s}\n`),
+): number {
   const flag = args[0];
-  const out = (s: string) => void process.stdout.write(`${s}\n`);
+  const out = (s: string) => void emit(s);
   const read = () => (existsSync(cfg.ledger) ? readFileSync(cfg.ledger, "utf8") : "");
   const usage = (): number => (process.stderr.write(`${USAGE}\n`), 2);
 
@@ -225,12 +239,27 @@ export function main(args: string[], cfg = loadConfig()): number {
     if (!needle) return usage();
     const before = read();
     if (!before) return out(`no ledger at ${cfg.ledger} — --add starts one`), 0;
+
+    const hits = matchingLines(before, needle);
+    if (!hits.length) {
+      out(`no match ${JSON.stringify(needle)} in ${parseLedger(before).length} entries`);
+      // Needles get built as "<script> (<romanization>)", but the ledger's
+      // parenthetical carries notes, so the closing paren never lines up.
+      // Retry on the leading token and show what it nearly hit.
+      const head = needle.split(" ")[0];
+      for (const l of (head === needle ? [] : matchingLines(before, head)).slice(0, 3)) {
+        out(`  near: ${l.slice(2, 72)}`);
+      }
+      return 0;
+    }
+
     const after = fn(before, needle, today());
     if (before === after) {
-      return out(`no match ${JSON.stringify(needle)} in ${parseLedger(before).length} entries`), 0;
+      return out(`already ${today()} — ${hits.length} matched, nothing to change`), 0;
     }
     writeFileSync(cfg.ledger, after);
-    return out(`${verb} ${JSON.stringify(needle)} -> ${today()}`), 0;
+    const n = hits.length > 1 ? ` (${hits.length} lines)` : "";
+    return out(`${verb} ${JSON.stringify(needle)} -> ${today()}${n}`), 0;
   };
 
   if (flag === "--path") return out(cfg.ledger), 0;
