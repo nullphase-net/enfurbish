@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+.venv/
+*.tmp
+docs/superpowers/
+.next-session-tmp/
+CLAUDE.md
+NEXT_SESSION.md
+graphify-out/
+TODO.md
