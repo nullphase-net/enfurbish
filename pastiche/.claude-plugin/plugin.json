@@ -1,6 +1,6 @@
 {
   "name": "pastiche",
-  "description": "Ambient language learning. A SessionStart hook weaves vocabulary from your ledger into ordinary Claude Code sessions — a steady drip tied to the work, not a quiz — and tracks what was last surfaced so stale items come back.",
+  "description": "Ambient language learning. A SessionStart hook weaves vocabulary into ordinary Claude Code sessions — stale items you are forgetting, a small budget of new terms drawn from the work itself, and anything you use unprompted recorded rather than taught back at you. The ledger is a markdown file you own, written by a CLI rather than by hand.",
   "version": "0.2.0",
   "license": "MIT",
   "keywords": ["language", "learning", "vocabulary", "immersion", "ledger"]

@@ -21,8 +21,8 @@ See [continuity/README.md](./continuity/README.md) for the tooling-journal forma
 A speed-bump against prompt injection through `CLAUDE.md` and `.claude/rules/*`.
 
 - **`SessionStart` hook** lists project instruction files and warns on any unaffirmed or modified file.
-- **`/affirm`** records SHA-256 hashes after you've reviewed.
-- **`/affirm --show`** / **`--revoke`** for inspection and rollback.
+- **`/affirm`** shows what's in scope with status, mtime, and git provenance.
+- **`/affirm -a`** records SHA-256 hashes after you've reviewed; **`-r`** revokes.
 
 See [affirm/README.md](./affirm/README.md) for the threat model and storage details.
 
@@ -32,8 +32,11 @@ Vocabulary in the margins of ordinary work, rather than a study session you have
 
 - **`SessionStart` hook** injects the items you've gone longest without seeing, plus how to
   present them, as `additionalContext`.
+- **Three ways in.** Reinforcement of stale items, a small per-session budget of new terms
+  drawn from whatever you're working on, and priming — a term you use yourself gets recorded
+  instead of taught back at you.
 - **A markdown ledger** you own and point at from config — one line per term, a `seen:` date
-  that sessions restamp as they use things.
+  that sessions restamp as they use things. A CLI writes it; the model calls the CLI.
 - **No intervals, no ease factors.** Used items rotate to the back; unreinforced ones keep
   coming back.
 

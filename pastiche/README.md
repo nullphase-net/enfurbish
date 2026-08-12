@@ -67,11 +67,23 @@ four times, not a claim about how well you know it now — `seen:` is what drive
 ## Commands
 
 ```bash
-bun run lib/pastiche.ts                 # what's due now
-bun run lib/pastiche.ts --due 10        # ...but ten of them
-bun run lib/pastiche.ts --seen "teuk"   # restamp a term to today
-bun run lib/pastiche.ts --path          # resolved ledger path
+bun run lib/pastiche.ts                            # what's due now
+bun run lib/pastiche.ts --due 10                   # ...but ten of them
+bun run lib/pastiche.ts --seen "teuk"              # used it — restamp to today
+bun run lib/pastiche.ts --mark "teuk"              # used it right — ✓ and restamp
+bun run lib/pastiche.ts --add km "ទឹក (teuk) — water"
+bun run lib/pastiche.ts --path                     # resolved ledger path
 ```
+
+Sessions call these; they don't edit the ledger. Formatting a line, stamping today's date
+into two fields, and inserting a marks field that may or may not already exist are
+deterministic operations, so they belong in code where they can be tested — not in a format
+string the model reassembles from memory each time. `--add` creates the file and its parent
+directory on first use, rejects a language code you haven't configured, and won't duplicate
+a term already present.
+
+Not-found exits 0 and says so on stdout; only misusing a flag exits 2. The caller is a
+session reading output, not a shell branching on `$?`.
 
 ## Language notes
 

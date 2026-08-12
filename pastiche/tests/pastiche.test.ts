@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  buildContext, loadConfig, loadNotes, parseLedger, restamp, stalest, today,
+  buildContext, formatEntry, loadConfig, loadNotes, mark, parseLedger, restamp, stalest, today,
 } from "../lib/pastiche";
 
 const LEDGER = `# Ledger
@@ -85,6 +85,53 @@ describe("restamp", () => {
   });
 });
 
+describe("mark", () => {
+  test("prepends ✓ to an existing marks field and restamps", () => {
+    const out = mark(LEDGER, "phteah", "2026-08-12");
+    expect(out).toContain("| ✓✓✓ family baseline | seen: 2026-08-12");
+  });
+
+  test("inserts a marks field when the line has none", () => {
+    const out = mark(LEDGER, "teuk", "2026-08-12");
+    expect(out).toContain("ទឹក (teuk) — water | 2026-01-01 | ✓ | seen: 2026-08-12");
+  });
+
+  test("adds both marks and seen: to a line that has neither", () => {
+    const out = mark(LEDGER, "el puerto", "2026-08-12");
+    expect(out).toContain("el puerto — port | 2026-02-02 | ✓ | seen: 2026-08-12");
+  });
+
+  test("leaves other lines and prose alone", () => {
+    const out = mark(`mentions teuk in prose\n${LEDGER}`, "teuk", "2026-08-12");
+    expect(out.split("\n")[0]).toBe("mentions teuk in prose");
+    expect(out).toContain("la red — network | 2026-02-01 | ✓ | seen: 2026-02-01");
+  });
+
+  test("no match leaves the text byte-identical", () => {
+    expect(mark(LEDGER, "nothing-here", "2026-08-12")).toBe(LEDGER);
+  });
+
+  test("marks accumulate — it is not idempotent, by design", () => {
+    const twice = mark(mark(LEDGER, "teuk", "2026-08-12"), "teuk", "2026-08-13");
+    expect(twice).toContain("| ✓✓ | seen: 2026-08-13");
+  });
+});
+
+describe("formatEntry", () => {
+  test("stamps today into both date fields", () => {
+    expect(formatEntry("km", "ទឹក (teuk) — water", "2026-08-12"))
+      .toBe("- km: ទឹក (teuk) — water | 2026-08-12 | seen: 2026-08-12");
+  });
+
+  test("round-trips through the parser", () => {
+    const e = parseLedger(formatEntry("es", "la red — network", "2026-08-12"));
+    expect(e.length).toBe(1);
+    expect(e[0].code).toBe("es");
+    expect(e[0].term).toBe("la red — network");
+    expect(e[0].seen).toBe("2026-08-12");
+  });
+});
+
 describe("loadConfig", () => {
   test("defaults when there is no config file", () => {
     const cfg = loadConfig(freshDir());
@@ -154,6 +201,15 @@ describe("buildContext", () => {
     const out = buildContext({ cfg, due: [], notes: "", pluginRoot: "/p" });
     expect(out).toContain("English");
     expect(out).not.toContain("bilingual");
+  });
+
+  // Writing the ledger is deterministic, so the prompt names commands rather
+  // than handing the model a format string to assemble by hand.
+  test("names the CLI commands instead of handing over a line format", () => {
+    const out = buildContext({ cfg, due: [], notes: "", pluginRoot: "/p" });
+    expect(out).toContain("--add");
+    expect(out).toContain("--mark");
+    expect(out).not.toContain("seen: <today>");
   });
 
   test("does not suppress new vocabulary in favor of the due list", () => {

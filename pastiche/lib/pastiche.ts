@@ -98,6 +98,35 @@ export function restamp(text: string, needle: string, date: string): string {
     .join("\n");
 }
 
+/**
+ * Prepend a ✓ to the marks field and restamp, on every line containing
+ * `needle` — marking only ever happens because the item was just used.
+ *
+ * The marks field is optional and free text (`✓✓ family baseline`), so a line
+ * without one gets it inserted before `seen:`, and a hand-written line with no
+ * `seen:` at all gets both appended. Marks accumulate and are never decayed;
+ * `seen:` is what drives selection.
+ */
+export function mark(text: string, needle: string, date: string): string {
+  return text
+    .split("\n")
+    .map(l => {
+      if (!CODE.test(l) || !l.includes(needle)) return l;
+      if (!SEEN.test(l)) return `${l} | ✓ | seen: ${date}`;
+      const parts = l.split(" | ");
+      const head = parts.slice(0, -1);
+      if (head.length >= 3) head[2] = `✓${head[2]}`;
+      else head.push("✓");
+      return [...head, `seen: ${date}`].join(" | ");
+    })
+    .join("\n");
+}
+
+/** Render a ledger line. The only place the on-disk format is written. */
+export function formatEntry(code: string, body: string, date: string): string {
+  return `- ${code}: ${body} | ${date} | seen: ${date}`;
+}
+
 export function buildContext(opts: {
   cfg: Config;
   due: Entry[];
@@ -149,9 +178,11 @@ Ledger: ${cfg.ledger}
 Due for re-surfacing (stalest first):
 ${dueList}
 
-After using an item, restamp it so it rotates out:
-  bun run ${join(pluginRoot, "lib", "pastiche.ts")} --seen "<term>"
-Append a new or primed item: \`- <code>: <term> — <gloss> | <today> | seen: <today>\``;
+Write the ledger with these, never by editing the file — they own the format:
+  P=${join(pluginRoot, "lib", "pastiche.ts")}
+  bun run $P --seen "<term>"                 # used it — rotates it out
+  bun run $P --mark "<term>"                 # they used it right — ✓ and rotate
+  bun run $P --add <code> "<term> — <gloss>" # new or primed item`;
 }
 
 /** Read `languages/<code>.md` for each configured language, concatenated. */
@@ -173,40 +204,68 @@ export function today(now = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
 
-if (import.meta.main) {
-  const args = process.argv.slice(2);
-  const cfg = loadConfig();
-  const flag = args[0];
+const USAGE = `usage: pastiche.ts [--due <n>]
+       --seen "<term>"              restamp: used it, rotate it out
+       --mark "<term>"              ✓ and restamp: they used it correctly
+       --add <code> "<term> — <gloss>"
+       --path`;
 
-  if (flag === "--path") {
-    process.stdout.write(`${cfg.ledger}\n`);
-  } else if (flag === "--seen") {
+/**
+ * ponytail: "not found" exits 0 per repo convention — the caller is a session
+ * reading stdout, not a shell branching on $?. Only arg misuse exits 2.
+ */
+export function main(args: string[], cfg = loadConfig()): number {
+  const flag = args[0];
+  const out = (s: string) => void process.stdout.write(`${s}\n`);
+  const read = () => (existsSync(cfg.ledger) ? readFileSync(cfg.ledger, "utf8") : "");
+  const usage = (): number => (process.stderr.write(`${USAGE}\n`), 2);
+
+  const edit = (fn: typeof restamp, verb: string): number => {
     const needle = args[1];
-    if (!needle) {
-      process.stderr.write("usage: pastiche.ts --seen <term-substring>\n");
-      process.exit(2);
-    }
-    if (!existsSync(cfg.ledger)) {
-      process.stderr.write(`no ledger at ${cfg.ledger}\n`);
-      process.exit(1);
-    }
-    const before = readFileSync(cfg.ledger, "utf8");
-    const after = restamp(before, needle, today());
+    if (!needle) return usage();
+    const before = read();
+    if (!before) return out(`no ledger at ${cfg.ledger} — --add starts one`), 0;
+    const after = fn(before, needle, today());
     if (before === after) {
-      process.stderr.write(`no ledger line matched ${JSON.stringify(needle)}\n`);
-      process.exit(1);
+      return out(`no match ${JSON.stringify(needle)} in ${parseLedger(before).length} entries`), 0;
     }
     writeFileSync(cfg.ledger, after);
-    process.stdout.write(`restamped ${JSON.stringify(needle)} -> ${today()}\n`);
-  } else {
-    // Default: print what's due, the same selection the hook injects.
-    if (!existsSync(cfg.ledger)) {
-      mkdirSync(dirname(cfg.ledger), { recursive: true });
-      process.stderr.write(`no ledger at ${cfg.ledger}\n`);
-      process.exit(1);
+    return out(`${verb} ${JSON.stringify(needle)} -> ${today()}`), 0;
+  };
+
+  if (flag === "--path") return out(cfg.ledger), 0;
+  if (flag === "--seen") return edit(restamp, "restamped");
+  if (flag === "--mark") return edit(mark, "✓");
+
+  if (flag === "--add") {
+    const [, code, body] = args;
+    if (!code || !body) return usage();
+    const codes = cfg.languages.map(l => l.code);
+    if (codes.length && !codes.includes(code)) {
+      return out(`unknown language ${JSON.stringify(code)} — configured: ${codes.join(", ")}`), 0;
     }
-    const n = flag === "--due" && args[1] ? Number.parseInt(args[1], 10) : cfg.due;
-    const due = stalest(parseLedger(readFileSync(cfg.ledger, "utf8")), n);
-    for (const e of due) process.stdout.write(`${e.seen}  ${e.code}: ${e.term}\n`);
+    const before = read();
+    // ponytail: exact-substring dedupe. A reworded gloss slips through; --mark
+    // is the fix when it does. Fuzzy matching if duplicates actually pile up.
+    if (before.includes(body)) return out(`exists: ${body}`), 0;
+    mkdirSync(dirname(cfg.ledger), { recursive: true });
+    const line = formatEntry(code, body, today());
+    writeFileSync(cfg.ledger, before && !before.endsWith("\n") ? `${before}\n${line}\n` : `${before}${line}\n`);
+    return out(`+ ${line}  (${parseLedger(before).length + 1} entries)`), 0;
   }
+
+  if (flag && flag !== "--due") return usage();
+
+  // Default: what's due, the same selection the hook injects.
+  const text = read();
+  if (!text) return out(`no ledger at ${cfg.ledger} — --add starts one`), 0;
+  const n = flag === "--due" && args[1] ? Number.parseInt(args[1], 10) : cfg.due;
+  if (!Number.isFinite(n)) return usage();
+  const entries = parseLedger(text);
+  for (const e of stalest(entries, n)) out(`${e.seen}  ${e.code}: ${e.term}`);
+  const hidden = entries.length - Math.min(n, entries.length);
+  if (hidden > 0) out(`+${hidden} fresher`);
+  return 0;
 }
+
+if (import.meta.main) process.exit(main(process.argv.slice(2)));
