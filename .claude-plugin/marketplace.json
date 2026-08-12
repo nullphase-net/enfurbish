@@ -1,6 +1,6 @@
 {
   "name": "enfurbish",
-  "description": "Claude Code plugins by phreakocious: session continuity and project-instruction approval gating.",
+  "description": "Claude Code plugins by phreakocious: session continuity, project-instruction approval gating, and ambient language learning.",
   "owner": {
     "name": "phreakocious",
     "email": "567063+phreakocious@users.noreply.github.com"
@@ -19,6 +19,13 @@
       "description": "Approval gate for project instructions. Surfaces new or modified CLAUDE.md and .claude/rules/* files at session start before Claude treats them as trusted.",
       "category": "security",
       "keywords": ["security", "prompt-injection", "claudemd", "approval", "guard"]
+    },
+    {
+      "name": "pastiche",
+      "source": "./pastiche",
+      "description": "Ambient language learning. A SessionStart hook weaves vocabulary from your ledger into ordinary sessions — a steady drip tied to the work, not a quiz — and tracks what was last surfaced so stale items come back.",
+      "category": "workflow",
+      "keywords": ["language", "learning", "vocabulary", "immersion", "ledger"]
     }
   ]
 }

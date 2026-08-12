@@ -1,6 +1,6 @@
 # Releasing
 
-Each plugin (`continuity/`, `affirm/`) ships independently. There is no top-level version; per-plugin tags are the source of truth.
+Each plugin (`continuity/`, `affirm/`, `pastiche/`) ships independently. There is no top-level version; per-plugin tags are the source of truth.
 
 ## What goes where
 
@@ -16,7 +16,7 @@ Semver-ish:
 - **minor** (`0.2.x` → `0.3.0`) — new command, new hook, new optional flag
 - **major** (`0.x` → `1.0`) — breaking change for an existing command, hook contract, or storage format
 
-If a change touches both `continuity/` and `affirm/`, bump them independently with their own commits and tags. They install independently and the marketplace tracks them by name.
+If a change touches more than one plugin, bump them independently with their own commits and tags. They install independently and the marketplace tracks them by name.
 
 ## Steps
 

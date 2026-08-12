@@ -26,6 +26,19 @@ A speed-bump against prompt injection through `CLAUDE.md` and `.claude/rules/*`.
 
 See [affirm/README.md](./affirm/README.md) for the threat model and storage details.
 
+### [`pastiche/`](./pastiche) — ambient language learning
+
+Vocabulary in the margins of ordinary work, rather than a study session you have to schedule.
+
+- **`SessionStart` hook** injects the items you've gone longest without seeing, plus how to
+  present them, as `additionalContext`.
+- **A markdown ledger** you own and point at from config — one line per term, a `seen:` date
+  that sessions restamp as they use things.
+- **No intervals, no ease factors.** Used items rotate to the back; unreinforced ones keep
+  coming back.
+
+See [pastiche/README.md](./pastiche/README.md) for the ledger format and config.
+
 ## Development
 
 Bun, TypeScript-native, no build step, no `package.json`. Bun's built-in test runner.
@@ -37,6 +50,7 @@ bun test
 # One plugin
 bun test continuity/tests/
 bun test affirm/tests/
+bun test pastiche/tests/
 ```
 
 There is no linter or formatter configured.
