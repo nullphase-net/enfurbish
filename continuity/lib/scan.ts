@@ -103,6 +103,28 @@ export type ScanOk = {
   reason?: string;
 };
 
+/**
+ * User-role records the transcript synthesises rather than the human typing them.
+ * Counting these — and, before 2026-08-18, counting nothing else — is what produced
+ * the chronic `turn_count.user` undercount logged across six wraps: a real prompt
+ * arrives as bare-string content, so the old `Array.isArray` guard skipped every
+ * one of them while `<task-notification>` records piled up around them.
+ */
+const SYNTHETIC_USER = /^\s*<(task-notification|local-command-caveat|local-command-stdout|bash-stdout|system-reminder|thinking)>/;
+
+/** `<command-name>/continuity:wrap</command-name>` — how a slash command reaches the transcript. */
+const COMMAND_NAME = /<command-name>\/?([^<]+)<\/command-name>/;
+
+/** Text a user record carries, from either content shape. Empty for tool-result-only records. */
+function userText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((c: any) => c?.type === "text")
+    .map((c: any) => c.text ?? "")
+    .join("\n");
+}
+
 export async function parseTranscript(path: string): Promise<ScanOk> {
   let degraded = false;
   let reason = "";
@@ -161,17 +183,22 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
       continue;
     }
 
-    if (obj.type === "user" && obj.message?.role === "user" && Array.isArray(obj.message.content)) {
-      const hasText = obj.message.content.some((c: any) => c.type === "text");
-      if (hasText) userTurns++;
-      for (const c of obj.message.content) {
-        if (c.type === "tool_result") {
-          const ent = inflight.get(c.tool_use_id);
-          if (ent && c.is_error) {
-            const bucket = ent.bucket === "tools" ? tools : mcp;
-            if (bucket[ent.name]) bucket[ent.name].errors++;
+    if (obj.type === "user" && obj.message?.role === "user") {
+      const text = userText(obj.message.content);
+      if (text.trim() && !SYNTHETIC_USER.test(text)) userTurns++;
+      const cmd = COMMAND_NAME.exec(text);
+      if (cmd) skillsSet.add(cmd[1].trim());
+
+      if (Array.isArray(obj.message.content)) {
+        for (const c of obj.message.content) {
+          if (c.type === "tool_result") {
+            const ent = inflight.get(c.tool_use_id);
+            if (ent && c.is_error) {
+              const bucket = ent.bucket === "tools" ? tools : mcp;
+              if (bucket[ent.name]) bucket[ent.name].errors++;
+            }
+            inflight.delete(c.tool_use_id);
           }
-          inflight.delete(c.tool_use_id);
         }
       }
     }
