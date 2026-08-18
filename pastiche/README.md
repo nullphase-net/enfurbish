@@ -66,6 +66,9 @@ four times, not a claim about how well you know it now — `seen:` is what drive
 
 ## Commands
 
+Paths are relative to the plugin root — `~/.claude/plugins/cache/enfurbish/pastiche/<version>/`
+when installed, or `pastiche/` in a checkout.
+
 ```bash
 bun run lib/pastiche.ts                            # what's due now
 bun run lib/pastiche.ts --due 10                   # ...but ten of them
@@ -86,7 +89,17 @@ a term already present.
 `--add <code> -` batches a whole session's additions into one call. Each `Bash` call is an
 independent chance for the permission layer to block, so adding N terms one-per-call meant N
 chances to silently lose one — a real occurrence, logged before this existed. The batch
-dedupes against the ledger and within itself, reports every skip, and writes once.
+dedupes against the ledger and within itself, reports every skip, and writes once:
+
+```
+$ printf 'la red — network\nel hilo — thread\n' | bun run lib/pastiche.ts --add es -
++ - es: el hilo — thread | 2026-08-18 | seen: 2026-08-18
+exists: la red — network
+(2 entries)
+```
+
+Bare `--add <code>` with no body is still arg misuse (exit 2), not a blocking read on a tty —
+the `-` is required to ask for stdin.
 
 Not-found exits 0 and says so on stdout; only misusing a flag exits 2. The caller is a
 session reading output, not a shell branching on `$?`.

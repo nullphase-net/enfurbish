@@ -2,7 +2,7 @@
 
 Intentional session continuity for Claude Code.
 
-A plugin that closes the loop between Claude Code sessions: `/wrap` ends a session by producing a retro, a tooling-stack verdict, and a handoff note. A `SessionStart` hook surfaces the handoff at the start of the next session. `/next` is a manual mirror for when the hook didn't fire.
+A plugin that closes the loop between Claude Code sessions: `/wrap` ends a session by producing a retro, a tooling-stack verdict, and a handoff note. A `SessionStart` hook names the handoff at the start of the next session without loading it. `/next` is what actually opens it.
 
 ## Commands
 
@@ -19,6 +19,23 @@ Run at the end of a session. Produces three files:
 ### `/next`
 
 Read-only. Lists every `NEXT_SESSION.md` under the project root, reads the newest, and summarizes "Start here" + "Open threads". Reading the *newest* rather than the cwd-local one is deliberate: cwd varies between sessions in one project, and an autonomous run in a subdirectory writes its own handoff. Use when the SessionStart hook didn't fire or you want to re-consult mid-session.
+
+The listing is a CLI you can run yourself:
+
+```bash
+bun run lib/handoffs.ts --cwd "$(pwd)"          # every handoff, newest first
+bun run lib/handoffs.ts --check ./NEXT_SESSION.md   # assistant | edited | unstamped
+```
+
+```
+2 handoffs · root ~/projects/zerotrace · local is 1d 10h staler than newest
+* sub/NEXT_SESSION.md      8h 39m ago wrapped 2026-08-18T09:00:00-05:00  stamp:assistant
+  NEXT_SESSION.md [local]  1d 18h ago wrapped 2026-08-16T22:45:00-05:00
+```
+
+The header line is the load-bearing one: reading only the cwd-local pointer is wrong exactly
+when it isn't the newest. A trailing `+Nh after header` on a row means the file was edited
+after its own `**Last wrapped:**` was written — mid-session reconciles the header doesn't describe.
 
 ### `SessionStart` hook
 
@@ -64,15 +81,18 @@ Scope is deliberately narrow: **only what you can change.** Skills you've instal
 - Action: file an issue requesting cursor pagination, or write a wrapper skill that handles concat.
 ```
 
-Read it with the CLI, not a grep:
+Read it with the CLI, not a grep. Paths below are relative to the plugin root — `~/.claude/plugins/cache/enfurbish/continuity/<version>/` when installed, or `continuity/` in a checkout:
 
 ```bash
-bun run continuity/lib/journal-append.ts --journal ~/.claude/tooling-journal.md --actions
-bun run continuity/lib/journal-append.ts --journal ~/.claude/tooling-journal.md --actions --tool continuity
-bun run continuity/lib/journal-append.ts --journal ~/.claude/tooling-journal.md --recent scan.ts
+J=~/.claude/tooling-journal.md
+bun run lib/journal-append.ts --journal $J --actions
+bun run lib/journal-append.ts --journal $J --actions --tool continuity
+bun run lib/journal-append.ts --journal $J --recent scan.ts
 ```
 
-`--actions` is the improvement backlog, newest first, carrying the qualifier the original wrap attached (`(recurring, unmoved)`, `(10th repetition)`). `--recent` returns whole sections for one tool. Both match tool names loosely, which is the point: headings and action prefixes are free text a model composed, and they drift. Measured over ~130 wraps, `grep '^- Action:'` reached 143 of 241 action lines, and the 98 it missed were disproportionately the long-running ones. `grep '^### continuity'` reached 109 of 134 sections across 35 spellings.
+`--actions` is the improvement backlog, newest first, carrying the qualifier the original wrap attached (`(recurring, unmoved)`, `(10th repetition)`). `--recent` returns whole sections for one tool. Both match tool names loosely, which is the point: headings and action prefixes are free text a model composed, and they drift.
+
+How much drift, measured against one real 130-wrap journal: `grep '^- Action:'` reached 143 of 241 action lines, and the 98 it missed skewed toward the long-running ones (`Action (recurring, unmoved)` ×17, `(10th repetition)` ×3). `grep '^### continuity'` reached 109 of 134 sections, across 35 distinct spellings of one plugin's name. Your journal will differ; the failure mode won't.
 
 Entries are written the same way — `/wrap` hands `journal-append.ts` JSON and `formatEntry` renders the on-disk shape. Raw markdown on stdin still appends verbatim for retroactive or hand-written entries.
 
@@ -126,9 +146,10 @@ Scoped per cwd by design. A multi-package repo (`frontend/`, `api/`) can hold in
 
 | File | When | Owner |
 |---|---|---|
-| `~/.claude/sessions/YYYY-MM-DD-<slug>-<sid8>.md` | every `/wrap` | plugin |
-| `~/.claude/tooling-journal.md` | every `/wrap` with a verdict to record (appended, atomic temp+rename) | plugin |
+| `~/.claude/sessions/YYYY-MM-DD-<slug>-<sid8>.md` | every `/wrap` — never under `-q` | plugin |
+| `~/.claude/tooling-journal.md` | every `/wrap` with a verdict to record (appended, atomic temp+rename) — never under `-q` | plugin |
 | `<cwd>/NEXT_SESSION.md` | every `/wrap`, unless all items resolved | plugin |
+| `~/.claude/state/continuity-firstfire/<session_id>` | first `SessionStart` fire of each session (re-fire suppression) | plugin |
 | `<cwd>/CLAUDE.md` or `~/.claude/CLAUDE.md` | only with explicit user confirmation | user |
 
 The plugin never modifies CLAUDE.md without asking. CLAUDE.md is user-authored, often committed to git, and durable — too important to mutate autonomously.
