@@ -192,7 +192,8 @@ Write the ledger with these, never by editing the file — they own the format:
   P=${join(pluginRoot, "lib", "pastiche.ts")}
   bun run $P --seen "<term>"                 # used it — rotates it out
   bun run $P --mark "<term>"                 # they used it right — ✓ and rotate
-  bun run $P --add <code> "<term> — <gloss>" # new or primed item`;
+  bun run $P --add <code> "<term> — <gloss>" # new or primed item
+  bun run $P --add <code> -                  # ...or several, one per stdin line`;
 }
 
 /** Read `languages/<code>.md` for each configured language, concatenated. */
@@ -218,6 +219,7 @@ const USAGE = `usage: pastiche.ts [--due <n>]
        --seen "<term>"              restamp: used it, rotate it out
        --mark "<term>"              ✓ and restamp: they used it correctly
        --add <code> "<term> — <gloss>"
+       --add <code> -               read one "<term> — <gloss>" per line from stdin
        --path`;
 
 /**
@@ -228,6 +230,7 @@ export function main(
   args: string[],
   cfg = loadConfig(),
   emit: (s: string) => void = s => void process.stdout.write(`${s}\n`),
+  stdin: () => string = () => readFileSync(0, "utf8"),
 ): number {
   const flag = args[0];
   const out = (s: string) => void emit(s);
@@ -273,14 +276,35 @@ export function main(
     if (codes.length && !codes.includes(code)) {
       return out(`unknown language ${JSON.stringify(code)} — configured: ${codes.join(", ")}`), 0;
     }
+    // `-` batches the whole session's additions into one call. Each Bash call is
+    // an independent chance for the permission layer to block, so N terms added
+    // one-per-call meant N chances to silently lose one; this makes it one.
+    const bodies = body === "-"
+      ? stdin().split("\n").map(s => s.trim()).filter(Boolean)
+      : [body];
+    if (!bodies.length) return out("stdin empty — nothing to add"), 0;
+
     const before = read();
-    // ponytail: exact-substring dedupe. A reworded gloss slips through; --mark
-    // is the fix when it does. Fuzzy matching if duplicates actually pile up.
-    if (before.includes(body)) return out(`exists: ${body}`), 0;
-    mkdirSync(dirname(cfg.ledger), { recursive: true });
-    const line = formatEntry(code, body, today());
-    writeFileSync(cfg.ledger, before && !before.endsWith("\n") ? `${before}\n${line}\n` : `${before}${line}\n`);
-    return out(`+ ${line}  (${parseLedger(before).length + 1} entries)`), 0;
+    let text = before;
+    const added: string[] = [];
+    const skipped: string[] = [];
+    for (const b of bodies) {
+      // ponytail: exact-substring dedupe. A reworded gloss slips through; --mark
+      // is the fix when it does. Fuzzy matching if duplicates actually pile up.
+      // Matching against the accumulator, not `before`, also dedupes within a batch.
+      if (text.includes(b)) { skipped.push(b); continue; }
+      const line = formatEntry(code, b, today());
+      text = text && !text.endsWith("\n") ? `${text}\n${line}\n` : `${text}${line}\n`;
+      added.push(line);
+    }
+    if (added.length) {
+      mkdirSync(dirname(cfg.ledger), { recursive: true });
+      writeFileSync(cfg.ledger, text);
+    }
+    for (const l of added) out(`+ ${l}`);
+    for (const b of skipped) out(`exists: ${b}`);
+    if (added.length) out(`(${parseLedger(before).length + added.length} entries)`);
+    return 0;
   }
 
   if (flag && flag !== "--due") return usage();

@@ -153,3 +153,58 @@ describe("default and --path", () => {
     expect(main(["--due", "lots"], fixture(SEED))).toBe(2);
   });
 });
+
+describe("--add - (batch from stdin)", () => {
+  const feed = (s: string) => () => s;
+
+  test("adds every line in one write", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    const rc = main(["--add", "km", "-"], c, s => void out.push(s),
+      feed("ខ្សែ (khsae) — thread\nផ្ទះ (phteah) — house\n"));
+    expect(rc).toBe(0);
+    const text = readFileSync(c.ledger, "utf8");
+    expect(text).toStartWith(SEED);
+    expect(text.split("\n").filter(Boolean).length).toBe(4);
+    expect(out.at(-1)).toBe("(4 entries)");
+  });
+
+  test("skips blank lines and surrounding whitespace", () => {
+    const c = fixture(SEED);
+    main(["--add", "km", "-"], c, () => {}, feed("\n  ខ្សែ (khsae) — thread  \n\n\n"));
+    expect(readFileSync(c.ledger, "utf8"))
+      .toBe(`${SEED}- km: ខ្សែ (khsae) — thread | ${NOW} | seen: ${NOW}\n`);
+  });
+
+  test("reports a duplicate against the ledger without dropping the rest", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    main(["--add", "es", "-"], c, s => void out.push(s),
+      feed("la red — network\nel puerto — port\n"));
+    expect(out.filter(s => s.startsWith("exists:"))).toEqual(["exists: la red — network"]);
+    expect(readFileSync(c.ledger, "utf8"))
+      .toBe(`${SEED}- es: el puerto — port | ${NOW} | seen: ${NOW}\n`);
+  });
+
+  test("dedupes within the batch itself", () => {
+    const c = fixture(SEED);
+    main(["--add", "es", "-"], c, () => {}, feed("el puerto — port\nel puerto — port\n"));
+    expect(readFileSync(c.ledger, "utf8").split("\n").filter(Boolean).length).toBe(3);
+  });
+
+  test("empty stdin writes nothing and still exits 0", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    expect(main(["--add", "km", "-"], c, s => void out.push(s), feed("\n  \n"))).toBe(0);
+    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+    expect(out).toEqual(["stdin empty — nothing to add"]);
+  });
+
+  test("an unconfigured language code is refused before stdin is read", () => {
+    const c = fixture(SEED);
+    let read = false;
+    main(["--add", "fr", "-"], c, () => {}, () => { read = true; return "bonjour — hello\n"; });
+    expect(read).toBe(false);
+    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+  });
+});

@@ -72,6 +72,7 @@ bun run lib/pastiche.ts --due 10                   # ...but ten of them
 bun run lib/pastiche.ts --seen "teuk"              # used it — restamp to today
 bun run lib/pastiche.ts --mark "teuk"              # used it right — ✓ and restamp
 bun run lib/pastiche.ts --add km "ទឹក (teuk) — water"
+bun run lib/pastiche.ts --add km -                 # ...or several, one per stdin line
 bun run lib/pastiche.ts --path                     # resolved ledger path
 ```
 
@@ -81,6 +82,11 @@ deterministic operations, so they belong in code where they can be tested — no
 string the model reassembles from memory each time. `--add` creates the file and its parent
 directory on first use, rejects a language code you haven't configured, and won't duplicate
 a term already present.
+
+`--add <code> -` batches a whole session's additions into one call. Each `Bash` call is an
+independent chance for the permission layer to block, so adding N terms one-per-call meant N
+chances to silently lose one — a real occurrence, logged before this existed. The batch
+dedupes against the ledger and within itself, reports every skip, and writes once.
 
 Not-found exits 0 and says so on stdout; only misusing a flag exits 2. The caller is a
 session reading output, not a shell branching on `$?`.
