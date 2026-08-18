@@ -1,81 +1,26 @@
 #!/usr/bin/env bun
-import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
-import { getIgnoredDirs } from "../lib/gitignore";
+import {
+  findProjectRoot,
+  scanForNextSessions,
+  scanForNextSessionsWithStats,
+  type NextSessionFile,
+  type ScanResult,
+} from "../lib/handoffs";
 import { humanizeDelta } from "../lib/humanize";
 import { markFirstFire } from "../lib/first-fire";
 
-const MAX_DEPTH = 4;
-const IGNORE_DIRS = new Set([
-  "node_modules", ".git", "vendor", "dist", "build", "target",
-  "__pycache__", ".venv", "venv",
-]);
-
-export type NextSessionFile = { path: string; mtimeMs: number };
-
-export type ScanResult = {
-  files: NextSessionFile[];
-  elapsedMs: number;
-  /** Per-toplevel-segment walk counts (subdirs entered under that toplevel). */
-  walks: Map<string, number>;
+// The scan itself lives in lib/handoffs.ts so `/next` can call it too; re-exported
+// here because the hook was its original home and tests still address it there.
+export {
+  findProjectRoot,
+  scanForNextSessions,
+  scanForNextSessionsWithStats,
+  type NextSessionFile,
+  type ScanResult,
 };
-
-export function scanForNextSessions(root: string, maxDepth = MAX_DEPTH): NextSessionFile[] {
-  return scanForNextSessionsWithStats(root, maxDepth).files;
-}
-
-export function scanForNextSessionsWithStats(root: string, maxDepth = MAX_DEPTH): ScanResult {
-  const out: NextSessionFile[] = [];
-  const ignored = getIgnoredDirs(root);
-  const walks = new Map<string, number>();
-  const start = performance.now();
-  function walk(dir: string, depth: number, topLevel: string | null) {
-    if (depth > maxDepth) return;
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (e.isSymbolicLink()) continue;
-      const full = join(dir, e.name);
-      if (e.isDirectory()) {
-        // Cheap-first ordering: name-based checks before the absolute-path
-        // Set lookup, which involves the `full` string we already built but
-        // would otherwise want to avoid for skipped dirs.
-        if (e.name.startsWith(".")) continue;
-        if (IGNORE_DIRS.has(e.name)) continue;
-        if (ignored.has(full)) continue;
-        const nextTop = topLevel ?? e.name;
-        walks.set(nextTop, (walks.get(nextTop) ?? 0) + 1);
-        walk(full, depth + 1, nextTop);
-      } else if (e.isFile() && e.name === "NEXT_SESSION.md") {
-        try {
-          const st = statSync(full);
-          out.push({ path: full, mtimeMs: st.mtimeMs });
-        } catch { /* skip unreadable */ }
-      }
-    }
-  }
-  walk(root, 0, null);
-  return { files: out, elapsedMs: performance.now() - start, walks };
-}
-
-export function findProjectRoot(start: string): string {
-  const home = homedir();
-  let cur = start;
-  while (true) {
-    if (existsSync(join(cur, ".git")) || existsSync(join(cur, "CLAUDE.md"))) {
-      return cur;
-    }
-    if (cur === home || cur === "/" || cur === "") return start;
-    const parent = join(cur, "..");
-    if (parent === cur) return start;
-    cur = parent;
-  }
-}
 
 function fmtAge(mtimeMs: number, now: number): string {
   return `${humanizeDelta(now - mtimeMs)} ago`;
