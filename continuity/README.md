@@ -14,9 +14,11 @@ Run at the end of a session. Produces three files:
 - **Tooling-journal entry** — appended to `~/.claude/tooling-journal.md`. Cross-session verdicts on the parts of your stack you can change.
 - **Handoff** — `<cwd>/NEXT_SESSION.md`. What the next session should pick up. Reconciled with any existing file: items survive until they're actually done, not until the next wrap fires.
 
+`/wrap -q` (or `--quick`) does only the local repo work — `NEXT_SESSION.md` and any CLAUDE.md routing. No retro, no journal entry. For a session whose value is a clean pointer rather than a retrospective.
+
 ### `/next`
 
-Read-only. Reads the local `NEXT_SESSION.md` and summarizes "Start here" + "Open threads". Use when the SessionStart hook didn't fire or you want to re-consult mid-session.
+Read-only. Lists every `NEXT_SESSION.md` under the project root, reads the newest, and summarizes "Start here" + "Open threads". Reading the *newest* rather than the cwd-local one is deliberate: cwd varies between sessions in one project, and an autonomous run in a subdirectory writes its own handoff. Use when the SessionStart hook didn't fire or you want to re-consult mid-session.
 
 ### `SessionStart` hook
 
@@ -62,18 +64,28 @@ Scope is deliberately narrow: **only what you can change.** Skills you've instal
 - Action: file an issue requesting cursor pagination, or write a wrapper skill that handles concat.
 ```
 
-Grep `^- Action:` to see the improvement backlog.
+Read it with the CLI, not a grep:
+
+```bash
+bun run continuity/lib/journal-append.ts --journal ~/.claude/tooling-journal.md --actions
+bun run continuity/lib/journal-append.ts --journal ~/.claude/tooling-journal.md --actions --tool continuity
+bun run continuity/lib/journal-append.ts --journal ~/.claude/tooling-journal.md --recent scan.ts
+```
+
+`--actions` is the improvement backlog, newest first, carrying the qualifier the original wrap attached (`(recurring, unmoved)`, `(10th repetition)`). `--recent` returns whole sections for one tool. Both match tool names loosely, which is the point: headings and action prefixes are free text a model composed, and they drift. Measured over ~130 wraps, `grep '^- Action:'` reached 143 of 241 action lines, and the 98 it missed were disproportionately the long-running ones. `grep '^### continuity'` reached 109 of 134 sections across 35 spellings.
+
+Entries are written the same way — `/wrap` hands `journal-append.ts` JSON and `formatEntry` renders the on-disk shape. Raw markdown on stdin still appends verbatim for retroactive or hand-written entries.
 
 ## What `/wrap` measures
 
 The retro and journal entry are informed by `scan.ts`, which parses the current session's transcript at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`. It reports:
 
 - Session start/end timestamps and duration
-- User turn count vs model turn count (post-compaction only when `compaction_count > 0` — see below)
+- User turn count vs model turn count (post-compaction only when `compaction_count > 0` — see below). A user turn is a typed prompt, a slash command, or a pasted attachment; the records Claude Code synthesizes into the user role (`<task-notification>`, `<local-command-stdout>`, `<system-reminder>`, tool results) are excluded.
 - Per-tool call counts and error counts, bucketed into `tools` (built-ins) vs `mcp` (`mcp__*` calls)
 - Hooks that fired during the session and how many times
 - `compaction_count` — number of `compact_boundary` events. Non-zero means turn counts are partial (everything before the last compaction is not in this transcript segment).
-- Skills invoked (via the `Skill` tool)
+- Skills invoked — both `Skill` tool calls and slash commands typed by the user, so built-in commands (`/clear`, `/compact`) appear here too
 - Files edited (most-recent first, capped at 50)
 - Number of files read
 
@@ -100,7 +112,13 @@ One sentence on the most important thing to pick up.
 
 ## Don't forget
 - Anything fragile or hard to reconstruct.
+
+<!-- wrap-generation 0123456789abcdef -->
 ```
+
+The header block is rendered by `handoffs.ts --header`, not typed — the same file parses `**Last wrapped:**` back out, so one function owns both ends. The body beneath it is prose the wrap composes; nothing parses it.
+
+The trailing `wrap-generation` line is a hash of the file's own content. `/wrap` writes it, and the next wrap compares it back: matching means nothing has touched the file since, so the per-item merge may proceed; not matching means someone hand-edited it and their notes must be preserved. It replaced an mtime test that misclassified the assistant's own writes as the user's.
 
 Scoped per cwd by design. A multi-package repo (`frontend/`, `api/`) can hold independent continuity threads; the SessionStart hook walks up to the project root and lists any siblings it finds, so nothing is forgotten.
 
