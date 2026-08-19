@@ -132,9 +132,27 @@ export function matchingLines(text: string, needle: string): string[] {
   return text.split("\n").filter(l => CODE.test(l) && l.includes(needle));
 }
 
-/** Render a ledger line. The only place the on-disk format is written. */
-export function formatEntry(code: string, body: string, date: string): string {
-  return `- ${code}: ${body} | ${date} | seen: ${date}`;
+/**
+ * Render a ledger line. The only place the on-disk format is written.
+ * `marks` seeds the optional third field — `✗` for a correction, so a later
+ * `mark()` reads `✓✗`: got it wrong once, right since.
+ */
+export function formatEntry(code: string, body: string, date: string, marks?: string): string {
+  const stamped = marks ? `${date} | ${marks}` : date;
+  return `- ${code}: ${body} | ${stamped} | seen: ${date}`;
+}
+
+/**
+ * Render a correction body: what they said, what it should be, and why.
+ *
+ * Corrections live in the ledger rather than in `languages/<code>.md` because
+ * they need rotation. The notes files are invariant facts about the language;
+ * a correction is a fact about this learner, and it should keep surfacing until
+ * it sticks and then rotate out on its own. The wrong form is kept because it is
+ * the half that predicts the next mistake.
+ */
+export function formatCorrection(wrong: string, right: string, rule: string): string {
+  return `${wrong} → ${right} — ${rule}`;
 }
 
 export function buildContext(opts: {
@@ -174,6 +192,11 @@ When the learner uses a term themselves, unprompted, they are priming you:
 - Not in the ledger → they already have it. Append it with a ✓. Confirm or
   correct in a clause and move on; never teach it back at them.
 
+When they correct you — a wrong form, a bad ending, a mangled tense — record it.
+That is the highest-value signal this system gets, and it is not vocabulary: the
+wrong form is kept next to the right one because it is what predicts the next
+mistake. A correction rotates like any other entry; --mark it once you get it right.
+
 Non-Latin scripts: always script + informal phonetic romanization + gloss —
 ទឹក (teuk) — water. Romanization is load-bearing; use informal phonetic
 romanization, not academic transliteration.
@@ -193,7 +216,8 @@ Write the ledger with these, never by editing the file — they own the format:
   bun run $P --seen "<term>"                 # used it — rotates it out
   bun run $P --mark "<term>"                 # they used it right — ✓ and rotate
   bun run $P --add <code> "<term> — <gloss>" # new or primed item
-  bun run $P --add <code> -                  # ...or several, one per stdin line`;
+  bun run $P --add <code> -                  # ...or several, one per stdin line
+  bun run $P --correct <code> "<wrong>" "<right>" "<rule>"   # they corrected you`;
 }
 
 /** Read `languages/<code>.md` for each configured language, concatenated. */
@@ -220,6 +244,7 @@ const USAGE = `usage: pastiche.ts [--due <n>]
        --mark "<term>"              ✓ and restamp: they used it correctly
        --add <code> "<term> — <gloss>"
        --add <code> -               read one "<term> — <gloss>" per line from stdin
+       --correct <code> "<wrong>" "<right>" "<rule>"
        --path`;
 
 /**
@@ -269,19 +294,35 @@ export function main(
   if (flag === "--seen") return edit(restamp, "restamped");
   if (flag === "--mark") return edit(mark, "✓");
 
-  if (flag === "--add") {
-    const [, code, body] = args;
-    if (!code || !body) return usage();
+  if (flag === "--add" || flag === "--correct") {
+    const code = args[1];
+    if (!code) return usage();
     const codes = cfg.languages.map(l => l.code);
     if (codes.length && !codes.includes(code)) {
       return out(`unknown language ${JSON.stringify(code)} — configured: ${codes.join(", ")}`), 0;
     }
-    // `-` batches the whole session's additions into one call. Each Bash call is
-    // an independent chance for the permission layer to block, so N terms added
-    // one-per-call meant N chances to silently lose one; this makes it one.
-    const bodies = body === "-"
-      ? stdin().split("\n").map(s => s.trim()).filter(Boolean)
-      : [body];
+
+    let bodies: string[];
+    let marks: string | undefined;
+    if (flag === "--correct") {
+      // Three args rather than one composed string: if the session assembled
+      // "<wrong> → <right> — <rule>" itself, the format would live in the prompt.
+      // No `-` batch form — corrections arrive one at a time, unlike a session's
+      // vocabulary dump.
+      const [, , wrong, right, rule] = args;
+      if (!wrong || !right || !rule) return usage();
+      bodies = [formatCorrection(wrong, right, rule)];
+      marks = "✗";
+    } else {
+      const body = args[2];
+      if (!body) return usage();
+      // `-` batches the whole session's additions into one call. Each Bash call is
+      // an independent chance for the permission layer to block, so N terms added
+      // one-per-call meant N chances to silently lose one; this makes it one.
+      bodies = body === "-"
+        ? stdin().split("\n").map(s => s.trim()).filter(Boolean)
+        : [body];
+    }
     if (!bodies.length) return out("stdin empty — nothing to add"), 0;
 
     const before = read();
@@ -293,7 +334,7 @@ export function main(
       // is the fix when it does. Fuzzy matching if duplicates actually pile up.
       // Matching against the accumulator, not `before`, also dedupes within a batch.
       if (text.includes(b)) { skipped.push(b); continue; }
-      const line = formatEntry(code, b, today());
+      const line = formatEntry(code, b, today(), marks);
       text = text && !text.endsWith("\n") ? `${text}\n${line}\n` : `${text}${line}\n`;
       added.push(line);
     }

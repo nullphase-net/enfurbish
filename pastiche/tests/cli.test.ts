@@ -208,3 +208,53 @@ describe("--add - (batch from stdin)", () => {
     expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
   });
 });
+
+describe("--correct", () => {
+  test("writes both forms and the rule, marked ✗", () => {
+    const c = fixture(SEED);
+    expect(main(["--correct", "es", "costa", "cuesta", "costar is o→ue, stressed forms only"], c))
+      .toBe(0);
+    expect(readFileSync(c.ledger, "utf8")).toBe(
+      `${SEED}- es: costa → cuesta — costar is o→ue, stressed forms only | ${NOW} | ✗ | seen: ${NOW}\n`,
+    );
+  });
+
+  // The point of keeping corrections in the ledger rather than in languages/<code>.md:
+  // they rotate, and getting it right later is recorded on the same line.
+  test("--mark on a correction reads ✓✗ — wrong once, right since", () => {
+    const c = fixture(SEED);
+    main(["--correct", "es", "costa", "cuesta", "o→ue when stressed"], c);
+    main(["--mark", "costa → cuesta"], c);
+    expect(readFileSync(c.ledger, "utf8")).toContain(`| ${NOW} | ✓✗ | seen: ${NOW}`);
+  });
+
+  test("surfaces in the due list like any other entry", () => {
+    const c = fixture(SEED);
+    main(["--correct", "km", "យាយ (yeay)", "តា (ta)", "yeay is grandma, ta is grandpa"], c);
+    const out: string[] = [];
+    main(["--due", "9"], c, s => void out.push(s));
+    expect(out.some(l => l.includes("យាយ (yeay) → តា (ta)"))).toBe(true);
+  });
+
+  test("all three of wrong/right/rule are required", () => {
+    const c = fixture(SEED);
+    expect(main(["--correct", "es", "costa", "cuesta"], c)).toBe(2);
+    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+  });
+
+  test("an unconfigured language code is refused", () => {
+    const c = fixture(SEED);
+    expect(main(["--correct", "fr", "bonjur", "bonjour", "silent h"], c)).toBe(0);
+    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+  });
+
+  test("the same correction twice is not duplicated", () => {
+    const c = fixture(SEED);
+    const args = ["--correct", "es", "costa", "cuesta", "o→ue when stressed"];
+    main(args, c);
+    const out: string[] = [];
+    main(args, c, s => void out.push(s));
+    expect(out.some(l => l.startsWith("exists:"))).toBe(true);
+    expect(readFileSync(c.ledger, "utf8").split("\n").filter(Boolean).length).toBe(3);
+  });
+});

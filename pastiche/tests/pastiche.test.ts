@@ -3,7 +3,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  buildContext, formatEntry, loadConfig, loadNotes, mark, parseLedger, restamp, stalest, today,
+  buildContext, formatCorrection, formatEntry, loadConfig, loadNotes, mark, parseLedger,
+  restamp, stalest, today,
 } from "../lib/pastiche";
 
 const LEDGER = `# Ledger
@@ -209,7 +210,10 @@ describe("buildContext", () => {
     const out = buildContext({ cfg, due: [], notes: "", pluginRoot: "/p" });
     expect(out).toContain("--add");
     expect(out).toContain("--mark");
+    expect(out).toContain("--correct");
     expect(out).not.toContain("seen: <today>");
+    // The correction shape is the CLI's to render; the prompt must not spell it out.
+    expect(out).not.toContain("<wrong> → <right>");
   });
 
   test("does not suppress new vocabulary in favor of the due list", () => {
@@ -238,4 +242,31 @@ describe("loadNotes", () => {
 
 test("today formats as YYYY-MM-DD", () => {
   expect(today(new Date("2026-08-12T22:00:00Z"))).toBe("2026-08-12");
+});
+
+describe("formatEntry marks", () => {
+  test("renders the optional third field", () => {
+    expect(formatEntry("es", "costa → cuesta — o→ue when stressed", "2026-08-18", "✗"))
+      .toBe("- es: costa → cuesta — o→ue when stressed | 2026-08-18 | ✗ | seen: 2026-08-18");
+  });
+
+  test("omitting it leaves the two-field shape untouched", () => {
+    expect(formatEntry("es", "la red — network", "2026-08-18"))
+      .toBe("- es: la red — network | 2026-08-18 | seen: 2026-08-18");
+  });
+
+  test("a marked line round-trips: the mark is not read as part of the term", () => {
+    const e = parseLedger(formatEntry("es", "costa → cuesta — o→ue", "2026-08-18", "✗"));
+    expect(e.length).toBe(1);
+    expect(e[0].term).toBe("costa → cuesta — o→ue");
+    expect(e[0].introduced).toBe("2026-08-18");
+    expect(e[0].seen).toBe("2026-08-18");
+  });
+});
+
+describe("formatCorrection", () => {
+  test("keeps the wrong form — it is what predicts the next mistake", () => {
+    expect(formatCorrection("costa", "cuesta", "costar is o→ue, stressed forms only"))
+      .toBe("costa → cuesta — costar is o→ue, stressed forms only");
+  });
 });

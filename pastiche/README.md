@@ -76,6 +76,7 @@ bun run lib/pastiche.ts --seen "teuk"              # used it — restamp to toda
 bun run lib/pastiche.ts --mark "teuk"              # used it right — ✓ and restamp
 bun run lib/pastiche.ts --add km "ទឹក (teuk) — water"
 bun run lib/pastiche.ts --add km -                 # ...or several, one per stdin line
+bun run lib/pastiche.ts --correct es "costa" "cuesta" "costar is o→ue, stressed forms only"
 bun run lib/pastiche.ts --path                     # resolved ledger path
 ```
 
@@ -101,6 +102,25 @@ exists: la red — network
 Bare `--add <code>` with no body is still arg misuse (exit 2), not a blocking read on a tty —
 the `-` is required to ask for stdin.
 
+## Corrections
+
+When someone corrects the session — a wrong ending, a bad tense, a form that isn't a word —
+that's the highest-value signal this thing gets, and it isn't vocabulary. `--correct` records
+it as an entry marked `✗`, keeping the wrong form next to the right one:
+
+```
+$ bun run lib/pastiche.ts --correct es "costa" "cuesta" "costar is o→ue, stressed forms only"
++ - es: costa → cuesta — costar is o→ue, stressed forms only | 2026-08-19 | ✗ | seen: 2026-08-19
+```
+
+The wrong form is kept deliberately: it's the half that predicts the next mistake. A
+correction then rotates like any other entry, and `--mark` on it once you get it right reads
+`✓✗` — wrong once, right since.
+
+Three separate arguments rather than one composed string, for the same reason the rest of the
+CLI exists: if the session assembled `<wrong> → <right> — <rule>` itself, the format would
+live in a prompt and drift.
+
 Not-found exits 0 and says so on stdout; only misusing a flag exits 2. The caller is a
 session reading output, not a shell branching on `$?`.
 
@@ -110,6 +130,10 @@ session reading output, not a shell branching on `$?`.
 due list — how to romanize, which contrasts English ears miss, what to write when a native
 speaker and the reference disagree. Khmer and Spanish are included. Adding a language is one
 file; it is read by code, not compiled in.
+
+These files hold invariant facts about the language, so they ship with the plugin and nothing
+writes to them at runtime. Anything true about *you* — including a correction — goes in the
+ledger instead, where it rotates and where a plugin update can't overwrite it.
 
 <!-- ponytail: no /setup command — the config is three keys and hand-editing JSON is fine.
      Add one if people actually get it wrong. -->
