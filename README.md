@@ -13,16 +13,18 @@ Closes the loop between Claude Code sessions.
 - **`/wrap`** ends a session by producing a retro, a tooling-stack verdict, and a `NEXT_SESSION.md` handoff for the next time.
 - **`SessionStart` hook** surfaces the handoff at the start of the next session via a `systemMessage` banner — no context dump unless you opt in.
 - **`/next`** loads the handoff on demand.
+- **Staleness evidence.** `handoffs.ts --since` reports what landed after a handoff was written — the commits, the files they touched, and how much is still uncommitted — so a session that ended without a wrap doesn't leave the next one re-triaging threads that are already done.
 
 See [continuity/README.md](./continuity/README.md) for the tooling-journal format and what `/wrap` measures.
 
 ### [`affirm/`](./affirm) — approval gate for project instructions
 
-A speed-bump against prompt injection through `CLAUDE.md` and `.claude/rules/*`.
+A speed-bump against prompt injection through `CLAUDE.md`, `.claude/rules/*`, and the files those reach via `@import` (followed two levels deep; imports pointing outside the project are hashed and flagged).
 
 - **`SessionStart` hook** lists project instruction files and warns on any unaffirmed or modified file.
 - **`/affirm`** shows what's in scope with status, mtime, and git provenance.
 - **`/affirm -a`** records SHA-256 hashes after you've reviewed; **`-r`** revokes.
+- **`--since <iso>`** lists only what moved inside a window. `continuity`'s `/wrap` runs it with the session's start time, so a change you made yourself is summarized at the end of that session rather than surfacing as a trust warning at the start of the next one.
 
 See [affirm/README.md](./affirm/README.md) for the threat model and storage details.
 
@@ -32,9 +34,9 @@ Vocabulary in the margins of ordinary work, rather than a study session you have
 
 - **`SessionStart` hook** injects the items you've gone longest without seeing, plus how to
   present them, as `additionalContext`.
-- **Three ways in.** Reinforcement of stale items, a small per-session budget of new terms
-  drawn from whatever you're working on, and priming — a term you use yourself gets recorded
-  instead of taught back at you.
+- **Four ways in.** Reinforcement of stale items, a small per-session budget of new terms
+  drawn from whatever you're working on, priming — a term you use yourself gets recorded
+  instead of taught back at you — and correction, when you fix a form the session got wrong.
 - **A markdown ledger** you own and point at from config — one line per term, a `seen:` date
   that sessions restamp as they use things. A CLI writes it; the model calls the CLI.
 - **No intervals, no ease factors.** Used items rotate to the back; unreinforced ones keep
@@ -60,7 +62,14 @@ There is no linter or formatter configured.
 
 ## Installation
 
-Each plugin installs separately via Claude Code's plugin mechanism. See per-plugin READMEs for the exact command.
+```
+/plugin marketplace add nullphase-net/enfurbish
+/plugin install continuity@enfurbish
+/plugin install affirm@enfurbish
+/plugin install pastiche@enfurbish
+```
+
+Each installs independently — take one, two, or all three. Per-plugin READMEs cover setup and configuration.
 
 ## License
 

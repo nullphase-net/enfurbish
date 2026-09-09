@@ -8,9 +8,10 @@ in the target language with its English translation when something finishes.
 No lessons, no quizzing, no flashcard session to schedule. You do your work; the language
 arrives in the margins of it.
 
-Vocabulary enters three ways: **reinforcement** of stale items from the ledger, a small
-budget of **new** terms the session draws from whatever you are working on, and **priming** —
-a term you drop into a prompt yourself gets recorded rather than taught back at you.
+Vocabulary enters four ways: **reinforcement** of stale items from the ledger, a small
+budget of **new** terms the session draws from whatever you are working on, **priming** —
+a term you drop into a prompt yourself gets recorded rather than taught back at you — and
+**correction**, when you fix a form the session got wrong.
 
 ## Install
 
