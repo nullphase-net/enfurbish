@@ -216,6 +216,19 @@ describe("buildContext", () => {
     expect(out).not.toContain("<wrong> → <right>");
   });
 
+  // Eight wraps logged a "register gate" for due items that never surfaced. Three
+  // consecutive sessions then falsified the framing: the failing items were
+  // technical vocabulary in entirely technical sessions, which register cannot
+  // explain. Subject match is the predictor, and the new-term budget already used it.
+  test("lets an unfitting due item stay due instead of forcing it, on subject not register", () => {
+    const out = buildContext({
+      cfg, due: stalest(parseLedger(LEDGER), 2), notes: "", pluginRoot: "/p",
+    });
+    expect(out).toContain("scheduling mismatch");
+    expect(out).toContain("subject");
+    expect(out).not.toContain("register");
+  });
+
   test("does not suppress new vocabulary in favor of the due list", () => {
     const out = buildContext({
       cfg, due: stalest(parseLedger(LEDGER), 2), notes: "", pluginRoot: "/p",
