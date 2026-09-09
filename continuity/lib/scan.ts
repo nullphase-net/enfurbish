@@ -1,6 +1,7 @@
 import { readdirSync, statSync, existsSync, createReadStream, realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { join, basename } from "node:path";
+import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 
 export function encodeCwd(cwd: string): string {
@@ -98,10 +99,89 @@ export type ScanOk = {
   compaction_count: number;
   skills_invoked: string[];
   files_edited: string[];
+  /**
+   * Present only when `files_edited` is uninformative: it is empty and the session
+   * used Bash, so a write via `sed`/heredoc/`cp` would leave no trace here. It does
+   * not mean edits happened — it means the transcript cannot tell you either way,
+   * which is a different claim from the empty list on its own. Auto mode routes
+   * every write through Bash, so this is the normal state there, not an anomaly.
+   */
+  files_edited_blind?: true;
+  /**
+   * Files git says changed since `session_start`, under `cwd`: commits in the window
+   * plus everything still dirty or untracked in the working tree. Present whenever
+   * Bash ran, because that is when `files_edited` stops being the whole story --- not
+   * only when it is empty. Absent (rather than empty) when git could not answer: no
+   * repo, no git, unparseable start timestamp. Empty means git looked and found none.
+   */
+  files_changed?: string[];
   files_read_count: number;
   degraded?: boolean;
   reason?: string;
 };
+
+/**
+ * What git says changed under `cwd` since `iso` --- the fallback for `files_edited`.
+ *
+ * `files_edited` is built from Edit/Write tool records, so a write performed with a
+ * heredoc, `sed` or a python patch script leaves nothing behind. Auto mode routes
+ * every write through Bash, which empties the field by construction: measured across
+ * eight consecutive wraps, `files_edited []` sat against 6, 2, 14 and 11 real file
+ * changes. The transcript cannot answer this question; the repo can.
+ *
+ * Two sources, because neither alone is complete: commits in the window catch work
+ * already landed, and porcelain catches work still dirty at wrap time --- which is
+ * most of it, since /wrap runs before the final commit as often as after.
+ *
+ * THIS IS REPO-SCOPED, NOT SESSION-SCOPED. It answers "what is different under this
+ * cwd since `iso`", not "what did this session do", and the two diverge whenever the
+ * tree has another writer: a concurrent session, a subagent in a different cwd of the
+ * same repo, or the user in an editor. `git log --since` also takes any author's
+ * commits, and only on HEAD --- a concurrent session on another branch is invisible
+ * here, so the error runs in both directions. Callers must corroborate before
+ * attributing anything in this list to the session.
+ *
+ * The dirty half is filtered by mtime, because `git status` is not time-bounded at
+ * all and reports work that predates the session entirely. Measured on this repo:
+ * 19 dirty files, of which one --- a version bump left over from a prior session ---
+ * was never touched by the session that reported it. A deleted path cannot be
+ * stat'd and is kept rather than dropped; missing a real deletion costs more than
+ * the occasional stale one.
+ *
+ * null means git could not answer. That is not the same fact as an empty list.
+ */
+export function gitChangedSince(cwd: string, iso: string): string[] | null {
+  if (!cwd || !(Date.parse(iso) > 0)) return null;
+  const git = (...args: string[]) =>
+    spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", maxBuffer: 8 << 20 });
+
+  const log = git("log", "--name-only", "--pretty=format:", `--since=${iso}`);
+  if (log.status !== 0) return null;
+
+  // `--porcelain` is stable across git versions by contract; `-z` avoids the quoting
+  // it applies to paths with spaces. XY status is the first two bytes, path the rest.
+  const dirty = git("status", "--porcelain", "-z");
+
+  const seen = new Set<string>();
+  for (const f of log.stdout.split("\n")) {
+    const t = f.trim();
+    if (t) seen.add(t);
+  }
+  if (dirty.status === 0) {
+    const cutoff = Date.parse(iso);
+    // A rename emits two NUL fields: `R  <dest>` then a bare `<src>` with no status
+    // bytes. Rather than track which field is which, take a path off either shape ---
+    // the source of a rename did change, so keeping it is right, not a leak.
+    for (const rec of dirty.stdout.split("\0")) {
+      if (!rec) continue;
+      const rel = /^[ MADRCU?!]{2} /.test(rec) ? rec.slice(3) : rec;
+      let m: number;
+      try { m = statSync(join(cwd, rel)).mtimeMs; } catch { seen.add(rel); continue; }
+      if (m > cutoff) seen.add(rel);
+    }
+  }
+  return [...seen].sort().slice(0, 50);
+}
 
 /**
  * User-role records the transcript synthesises rather than the human typing them.
@@ -109,8 +189,16 @@ export type ScanOk = {
  * the chronic `turn_count.user` undercount logged across six wraps: a real prompt
  * arrives as bare-string content, so the old `Array.isArray` guard skipped every
  * one of them while `<task-notification>` records piled up around them.
+ *
+ * `Base directory for this skill:` is how a loaded SKILL.md enters the transcript,
+ * and it is the one shape here that is not tag-delimited. The slash command that
+ * triggered the load is already counted one record earlier, so counting the body
+ * counts a single user action twice. Measured on session c9fac9d5: 10 counted
+ * against 7 real prompts, and all three of the excess were skill bodies — not the
+ * background-task notifications the wrap blamed, which this pattern already caught.
+ * The sign of this field's error is not stable; check the records, not the prior.
  */
-const SYNTHETIC_USER = /^\s*<(task-notification|local-command-caveat|local-command-stdout|bash-stdout|system-reminder|thinking)>/;
+const SYNTHETIC_USER = /^\s*(<(task-notification|local-command-caveat|local-command-stdout|bash-stdout|system-reminder|thinking)>|Base directory for this skill:)/;
 
 /** `<command-name>/continuity:wrap</command-name>` — how a slash command reaches the transcript. */
 const COMMAND_NAME = /<command-name>\/?([^<]+)<\/command-name>/;
@@ -252,6 +340,10 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
     lastTs ??= "";
   }
 
+  // Whenever Bash ran, not only when files_edited came back empty: one Edit call
+  // beside twenty heredoc writes yields a non-empty list that is still not the story.
+  const gitChanged = (tools.Bash?.calls ?? 0) > 0 ? gitChangedSince(cwd, firstTs!) : null;
+
   return {
     ok: true,
     session_id,
@@ -269,6 +361,8 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
     compaction_count: compactionCount,
     skills_invoked: [...skillsSet],
     files_edited,
+    ...(files_edited.length === 0 && (tools.Bash?.calls ?? 0) > 0 ? { files_edited_blind: true } : {}),
+    ...(gitChanged ? { files_changed: gitChanged } : {}),
     files_read_count: filesReadCount,
     ...(degraded ? { degraded: true, reason } : {}),
   };

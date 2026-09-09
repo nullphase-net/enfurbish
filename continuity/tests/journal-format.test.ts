@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import {
-  findActions, formatEntry, matching, parseSections, reportActions, reportRecent,
+  findActions, findClosed, formatEntry, matching, parseSections, reportActions, reportRecent,
 } from "../lib/journal-append";
 
 // The journal's shape used to live only in wrap/SKILL.md prose. These pin the
@@ -115,4 +115,56 @@ test("reportRecent returns whole sections, newest first", () => {
   expect(out.split("\n")[0]).toBe('4 sections · "continuity" · 4 spellings · showing last 2');
   expect(out).toContain("### continuity:wrap (step-5 mtime rule)");
   expect(out).not.toContain("### continuity scan.ts");
+});
+
+// --- Closed: the retirement wrap/SKILL.md has always asked for and never had ---
+
+const WITH_CLOSED = formatEntry({
+  timestamp: "2026-09-08T21:00:00-05:00",
+  slug: "enfurbish",
+  session: "deadbeef",
+  arc: "closed two standing actions",
+  tools: [{
+    name: "pastiche (SessionStart hook)",
+    verdict: "neutral",
+    notes: ["3 due, 1 surfaced"],
+    closed: ["the register gate — retired; subject match, not register, is the predictor"],
+    action: "something still open",
+  }],
+});
+
+test("formatEntry renders Closed where parseSections and findClosed can see it", () => {
+  const secs = parseSections(WITH_CLOSED);
+  const done = findClosed(secs);
+  expect(done).toHaveLength(1);
+  expect(done[0].text).toContain("register gate");
+  expect(done[0].tool).toBe("pastiche (SessionStart hook)");
+});
+
+// Closed and open must not contaminate each other: the whole point is that a
+// reader can tell them apart.
+test("findActions does not pick up Closed lines, and findClosed does not pick up Actions", () => {
+  const secs = parseSections(WITH_CLOSED);
+  expect(findActions(secs).map(a => a.text)).toEqual(["something still open"]);
+  expect(findClosed(secs).map(a => a.text)).not.toContain("something still open");
+});
+
+test("reportActions leads with the closed block so a reader reaches it", () => {
+  const out = reportActions(parseSections(WITH_CLOSED), undefined, 20);
+  expect(out).toContain("1 action · 1 closed");
+  expect(out.indexOf("closed:")).toBeLessThan(out.indexOf("open:"));
+  expect(out.indexOf("register gate")).toBeLessThan(out.indexOf("something still open"));
+});
+
+// The other direction: no closed lines means no closed block and no count. A
+// journal with 312 open actions and none retired must not grow boilerplate.
+test("reportActions says nothing about closed when nothing is closed", () => {
+  const plain = formatEntry({
+    timestamp: "2026-09-08T21:00:00-05:00", slug: "x", session: "d", arc: "a",
+    tools: [{ name: "t", verdict: "helped", action: "do the thing" }],
+  });
+  const out = reportActions(parseSections(plain), undefined, 20);
+  expect(out).toContain("1 action");
+  expect(out).not.toContain("closed");
+  expect(out).not.toContain("open:");
 });

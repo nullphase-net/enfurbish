@@ -2,7 +2,9 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collect, formatHeader, generation, main, ownership, report, stamp } from "../lib/handoffs";
+import { collect, commitsSince, formatHeader, generation, main, ownership, report, stamp, windowSince } from "../lib/handoffs";
+import { spawnSync } from "node:child_process";
+import { gitInitClean } from "./helpers/git";
 
 // --- wrap-generation stamp -------------------------------------------------
 
@@ -143,4 +145,133 @@ test("formatHeader marks a quick wrap as having no retro", () => {
 
 test("--header requires slug, timestamp and session", () => {
   expect(main(["--header", "enfurbish"], Date.now(), () => {})).toBe(2);
+});
+
+// --- commitsSince ----------------------------------------------------------
+
+function repoWithCommits(dates: string[]): string {
+  const root = mkdtempSync(join(tmpdir(), "handoffs-git-"));
+  const fx = gitInitClean(root);
+  try {
+    for (const iso of dates) {
+      writeFileSync(join(root, "f.txt"), iso);
+      spawnSync("git", ["add", "-A"], { cwd: root });
+      spawnSync("git", ["commit", "-q", "-m", iso], {
+        cwd: root,
+        env: { ...process.env, GIT_COMMITTER_DATE: iso, GIT_AUTHOR_DATE: iso },
+      });
+    }
+  } finally {
+    fx.cleanup();
+  }
+  return root;
+}
+
+const COMMITS = [
+  "2026-08-18T16:00:00-05:00",
+  "2026-08-18T18:00:00-05:00",
+  "2026-08-18T19:00:00-05:00",
+];
+
+test("commitsSince counts only the commits that postdate the header", () => {
+  const root = repoWithCommits(COMMITS);
+  expect(commitsSince(root, "2026-08-18T17:00:00-05:00")).toBe(2);
+  expect(commitsSince(root, "2026-08-18T15:00:00-05:00")).toBe(3);
+});
+
+test("commitsSince is 0, not null, when the handoff is current with the repo", () => {
+  const root = repoWithCommits(COMMITS);
+  expect(commitsSince(root, "2026-08-18T20:00:00-05:00")).toBe(0);
+});
+
+test("commitsSince is null when it cannot tell — no repo, no header, bad header", () => {
+  const root = repoWithCommits(COMMITS);
+  const bare = mkdtempSync(join(tmpdir(), "handoffs-nogit-"));
+  expect(commitsSince(bare, "2026-08-18T17:00:00-05:00")).toBe(null);
+  expect(commitsSince(root, null)).toBe(null);
+  expect(commitsSince(root, "no header")).toBe(null);
+});
+
+// Age measures the file; this measures the repo it describes. A 2026-08-18
+// session briefed from an accurately-reported 2h52m-old pointer that 14 commits
+// had already obsoleted.
+test("report names the commits that postdate the newest handoff", () => {
+  const root = repoWithCommits(COMMITS);
+  writeFileSync(join(root, "NEXT_SESSION.md"),
+    "# Next session — proj\n\n**Last wrapped:** 2026-08-18T17:00:00-05:00 (session deadbeef)\n\n## Open threads\n- [ ] a thing\n");
+  const out = report(collect(root, root), root, Date.parse("2026-08-18T20:00:00-05:00"));
+  expect(out.split("\n")[0]).toContain("newest 2 commits behind");
+  expect(out.split("\n")[1]).toContain("+2 commits");
+});
+
+test("report stays silent about commits when the handoff is current", () => {
+  const root = repoWithCommits(COMMITS);
+  writeFileSync(join(root, "NEXT_SESSION.md"),
+    "# Next session — proj\n\n**Last wrapped:** 2026-08-18T20:00:00-05:00 (session deadbeef)\n\n## Open threads\n- [ ] a thing\n");
+  const out = report(collect(root, root), root, Date.parse("2026-08-18T21:00:00-05:00"));
+  expect(out).not.toContain("commit");
+});
+
+// --- windowSince: the evidence for "which of these are already done?" -------
+
+const HANDOFF = (iso: string) =>
+  `# Next session — proj\n\n**Last wrapped:** ${iso} (session deadbeef)\n\n## Open threads\n- [ ] a thing\n`;
+
+test("windowSince names the commits and files that landed after the header", () => {
+  const root = repoWithCommits(COMMITS);
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, HANDOFF("2026-08-18T17:00:00-05:00"));
+  const out = windowSince(root, p);
+  expect(out).toContain("2 commits");
+  expect(out).toContain("2026-08-18T18:00:00-05:00");
+  expect(out).toContain("2026-08-18T19:00:00-05:00");
+  expect(out).not.toContain("2026-08-18T16:00:00-05:00");
+  expect(out).toContain("files: f.txt");
+});
+
+// The other direction: a current handoff must read as an all-clear, not as silence.
+test("windowSince says 0 and says the handoff still describes HEAD", () => {
+  const root = repoWithCommits(COMMITS);
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, HANDOFF("2026-08-18T20:00:00-05:00"));
+  spawnSync("git", ["add", "-A"], { cwd: root });
+  spawnSync("git", ["commit", "-q", "-m", "handoff"], {
+    cwd: root,
+    env: { ...process.env, GIT_COMMITTER_DATE: "2026-08-18T19:30:00-05:00", GIT_AUTHOR_DATE: "2026-08-18T19:30:00-05:00" },
+  });
+  const out = windowSince(root, p);
+  expect(out).toContain("0 commits");
+  expect(out).toContain("still describes HEAD");
+  expect(out).not.toContain("uncommitted");
+});
+
+// This repo's own case on 2026-09-08: 0 commits since the header and 8 dirty
+// files. "Still describes HEAD" would have been the wrong answer.
+test("windowSince counts uncommitted work, which is what an unwrapped session leaves", () => {
+  const root = repoWithCommits(COMMITS);
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, HANDOFF("2026-08-18T20:00:00-05:00"));
+  const out = windowSince(root, p);
+  expect(out).toContain("0 commits");
+  expect(out).toContain("1 uncommitted");
+  expect(out).toContain("predates uncommitted work");
+  expect(out).not.toContain("still describes HEAD");
+});
+
+test("windowSince refuses rather than guesses — absent file, no header, no repo", () => {
+  const root = repoWithCommits(COMMITS);
+  const bare = mkdtempSync(join(tmpdir(), "handoffs-nogit-"));
+  expect(windowSince(root, join(root, "nope.md"))).toContain("absent");
+
+  const noHeader = join(root, "NEXT_SESSION.md");
+  writeFileSync(noHeader, "# Next session\n\n## Open threads\n- [ ] a thing\n");
+  expect(windowSince(root, noHeader)).toContain("window unknown");
+
+  const outside = join(bare, "NEXT_SESSION.md");
+  writeFileSync(outside, HANDOFF("2026-08-18T17:00:00-05:00"));
+  expect(windowSince(bare, outside)).toContain("window unknown");
+});
+
+test("--since requires a path", () => {
+  expect(main(["--since"], Date.now(), () => {})).toBe(2);
 });

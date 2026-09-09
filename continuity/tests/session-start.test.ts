@@ -3,7 +3,8 @@ import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { scanForNextSessions } from "../hooks/session-start";
+import { buildBanner, scanForNextSessions } from "../hooks/session-start";
+import type { Handoff } from "../lib/handoffs";
 import { gitInitClean } from "./helpers/git";
 
 const SCRIPT = join(import.meta.dir, "..", "hooks", "session-start.ts");
@@ -288,4 +289,49 @@ test("slow scan with no handoffs still emits {} (suffix-only invariant)", () => 
   });
   expect(res.status).toBe(0);
   expect(res.stdout.trim()).toBe("{}");
+});
+
+// --- buildBanner: commits-behind is the warning age cannot give -------------
+
+const HO = (over: Partial<Handoff> = {}): Handoff => ({
+  path: "/proj/NEXT_SESSION.md",
+  rel: "NEXT_SESSION.md",
+  mtimeMs: Date.parse("2026-09-08T18:00:00Z"),
+  wrapped: "2026-09-08T18:00:00Z",
+  commitsSince: null,
+  local: true,
+  ownership: "assistant",
+  ...over,
+});
+
+const NOW = Date.parse("2026-09-08T20:00:00Z");
+
+test("buildBanner warns when the repo moved past the handoff", () => {
+  const msg = buildBanner({ sessionCwd: "/proj", projectRoot: "/proj", now: NOW,
+    handoffs: [HO({ commitsSince: 9 })] })!;
+  expect(msg).toContain("9 commits behind");
+  expect(msg).toContain("already done");
+});
+
+// The other direction, and the reason it matters: 0 and null are both "no warning",
+// and a banner that cried wolf on every current handoff would be ignored.
+test("buildBanner stays silent about commits when there are none, and when it cannot tell", () => {
+  for (const n of [0, null]) {
+    const msg = buildBanner({ sessionCwd: "/proj", projectRoot: "/proj", now: NOW,
+      handoffs: [HO({ commitsSince: n })] })!;
+    expect(msg).toContain("NEXT_SESSION.md present");
+    expect(msg).not.toContain("behind");
+    expect(msg).not.toContain("already done");
+  }
+});
+
+test("buildBanner carries commits-behind onto sibling lines too", () => {
+  const msg = buildBanner({ sessionCwd: "/proj/sub", projectRoot: "/proj", now: NOW,
+    handoffs: [HO({ local: false, commitsSince: 3 })] })!;
+  expect(msg).toContain("sibling dirs");
+  expect(msg).toContain("3 commits behind");
+});
+
+test("buildBanner returns null when there is nothing to say", () => {
+  expect(buildBanner({ sessionCwd: "/proj", projectRoot: "/proj", now: NOW, handoffs: [] })).toBe(null);
 });

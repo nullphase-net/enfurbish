@@ -40,6 +40,17 @@ export type ToolNote = {
   notes?: string[];
   /** The highest-value field in the journal. Omit when there genuinely isn't one. */
   action?: string;
+  /**
+   * Standing actions this wrap retired — done, or deliberately abandoned, with why.
+   *
+   * `wrap/SKILL.md` has told six months of wraps that an unmoved action is "the one
+   * to act on or explicitly retire", while offering no way to retire one. So nothing
+   * ever was: `--actions` returns every action ever written, 312 of them, with closed
+   * and open indistinguishable. pastiche's register gate was re-logged eight times
+   * and all eight sat in the default view. Naming the action in prose is enough —
+   * nothing matches these back to their originals, a reader does.
+   */
+  closed?: string[];
 };
 
 export type Entry = {
@@ -61,6 +72,7 @@ export function formatEntry(e: Entry): string {
     const usage = t.usage ? `${SEP}${t.usage}` : "";
     out.push("", `### ${t.name}${usage}${SEP}verdict: ${t.verdict}`);
     for (const n of t.notes ?? []) out.push(`- ${n}`);
+    for (const c of t.closed ?? []) out.push(`- Closed: ${c}`);
     if (t.action) out.push(`- Action: ${t.action}`);
   }
   return out.join("\n") + "\n";
@@ -116,17 +128,28 @@ export function matching(secs: Section[], tool?: string): Section[] {
  */
 const ACTION = /^-\s*\*{0,2}Action\b\s*(\([^)]*\))?\s*\*{0,2}\s*:\s*\*{0,2}\s*(.*)$/;
 
+/** `- Closed: …`, `- **Closed (retired):** …` — the same shape, loose for the same reason. */
+const CLOSED = /^-\s*\*{0,2}Closed\b\s*(\([^)]*\))?\s*\*{0,2}\s*:\s*\*{0,2}\s*(.*)$/;
+
 export type Action = { entry: string; tool: string; qualifier: string; text: string };
 
-export function findActions(secs: Section[]): Action[] {
+function collectLines(secs: Section[], re: RegExp): Action[] {
   const out: Action[] = [];
   for (const s of secs) {
     for (const line of s.body) {
-      const m = ACTION.exec(line);
+      const m = re.exec(line);
       if (m) out.push({ entry: s.entry, tool: s.tool, qualifier: m[1] ?? "", text: m[2].trim() });
     }
   }
   return out;
+}
+
+export function findActions(secs: Section[]): Action[] {
+  return collectLines(secs, ACTION);
+}
+
+export function findClosed(secs: Section[]): Action[] {
+  return collectLines(secs, CLOSED);
 }
 
 function clip(s: string, n: number): string {
@@ -138,17 +161,29 @@ function spellings(secs: Section[]): number {
   return new Set(secs.map(s => s.tool)).size;
 }
 
+function row(a: Action): string {
+  return `${a.entry.slice(0, 10)}  ${clip(a.tool, 34).padEnd(34)}  ${a.qualifier ? a.qualifier + " " : ""}${clip(a.text, 100)}`;
+}
+
 export function reportActions(secs: Section[], tool: string | undefined, limit: number): string {
   const hit = matching(secs, tool);
   const acts = findActions(hit).reverse();
+  const done = findClosed(hit).reverse();
   const scope = tool ? ` · "${tool}" matches ${hit.length}/${secs.length} sections, ${spellings(hit)} spellings` : "";
-  const head = `${acts.length} action${acts.length === 1 ? "" : "s"}${scope}`;
-  if (acts.length === 0) return head;
+  const head = `${acts.length} action${acts.length === 1 ? "" : "s"}${done.length ? ` · ${done.length} closed` : ""}${scope}`;
+  if (acts.length === 0 && done.length === 0) return head;
 
-  const lines = acts.slice(0, limit).map(a =>
-    `${a.entry.slice(0, 10)}  ${clip(a.tool, 34).padEnd(34)}  ${a.qualifier ? a.qualifier + " " : ""}${clip(a.text, 100)}`);
+  const lines = acts.slice(0, limit).map(row);
   const hidden = acts.length - lines.length;
-  return [head, ...lines, ...(hidden > 0 ? [`+${hidden} older`] : [])].join("\n");
+  // Closed first and uncapped: the whole point is that a retired action stops being
+  // re-logged, and a reader who never reaches it will log it again. There are single
+  // digits of these against hundreds of open ones.
+  return [
+    head,
+    ...(done.length ? ["closed:", ...done.map(row), "open:"] : []),
+    ...lines,
+    ...(hidden > 0 ? [`+${hidden} older`] : []),
+  ].join("\n");
 }
 
 export function reportRecent(secs: Section[], tool: string, limit: number): string {

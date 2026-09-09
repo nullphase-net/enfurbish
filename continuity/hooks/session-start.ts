@@ -3,9 +3,11 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
 import {
+  collect,
   findProjectRoot,
   scanForNextSessions,
   scanForNextSessionsWithStats,
+  type Handoff,
   type NextSessionFile,
   type ScanResult,
 } from "../lib/handoffs";
@@ -26,34 +28,52 @@ function fmtAge(mtimeMs: number, now: number): string {
   return `${humanizeDelta(now - mtimeMs)} ago`;
 }
 
+/**
+ * ` · N commits behind` — the repo moved after the handoff was written.
+ *
+ * Age measures the file and the banner already said it; this measures the code the
+ * file describes, and the two come apart exactly when the handoff is most misleading.
+ * A pointer reported as a clean 2h52m old had 14 commits behind it, and a session
+ * briefed from it and lost turns to work already committed. Sessions that end without
+ * a wrap are the normal way this happens, so the banner assumes it rather than
+ * treating it as the exception.
+ *
+ * null (could not tell) and 0 (looked, found none) both render as nothing here: the
+ * banner is a warning surface, and only a positive count is a warning.
+ */
+function fmtBehind(h: Handoff): string {
+  return h.commitsSince ? ` · ${h.commitsSince} commit${h.commitsSince === 1 ? "" : "s"} behind` : "";
+}
+
 export function buildBanner(opts: {
   sessionCwd: string;
   projectRoot: string;
-  files: NextSessionFile[];
+  handoffs: Handoff[];
   now?: number;
 }): string | null {
   const now = opts.now ?? Date.now();
-  const localPath = join(opts.sessionCwd, "NEXT_SESSION.md");
-  const local = opts.files.find(f => f.path === localPath);
-  const siblings = opts.files.filter(f => f.path !== localPath);
+  const local = opts.handoffs.find(h => h.local);
+  const siblings = opts.handoffs.filter(h => !h.local);
 
   if (!local && siblings.length === 0) return null;
 
+  const line = (h: Handoff) =>
+    `\n  - ${relative(opts.projectRoot, h.path)}  (modified ${fmtAge(h.mtimeMs, now)}${fmtBehind(h)})`;
+
   if (local) {
-    let msg = `Continuity: NEXT_SESSION.md present from your last wrap (modified ${fmtAge(local.mtimeMs, now)}). Run /next to pick it up.`;
+    let msg = `Continuity: NEXT_SESSION.md present from your last wrap (modified ${fmtAge(local.mtimeMs, now)}${fmtBehind(local)}). Run /next to pick it up.`;
+    if (local.commitsSince) {
+      msg += ` Commits landed after it was written — some open threads are likely already done.`;
+    }
     if (siblings.length > 0) {
       msg += ` ${siblings.length} sibling handoff${siblings.length === 1 ? "" : "s"} also found:`;
-      for (const s of siblings) {
-        msg += `\n  - ${relative(opts.projectRoot, s.path)}  (modified ${fmtAge(s.mtimeMs, now)})`;
-      }
+      for (const s of siblings) msg += line(s);
     }
     return msg;
   }
 
   let msg = `Continuity: no NEXT_SESSION.md in this cwd, but ${siblings.length} handoff${siblings.length === 1 ? "" : "s"} in sibling dirs:`;
-  for (const s of siblings) {
-    msg += `\n  - ${relative(opts.projectRoot, s.path)}  (modified ${fmtAge(s.mtimeMs, now)})`;
-  }
+  for (const s of siblings) msg += line(s);
   return msg;
 }
 
@@ -114,7 +134,7 @@ if (import.meta.main) {
     const sessionCwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
     const projectRoot = findProjectRoot(sessionCwd);
     const { files, elapsedMs, walks } = scanForNextSessionsWithStats(projectRoot);
-    const banner = buildBanner({ sessionCwd, projectRoot, files });
+    const banner = buildBanner({ sessionCwd, projectRoot, handoffs: collect(sessionCwd, projectRoot, files) });
     debugLog(`cwd=${sessionCwd} root=${projectRoot} files=${files.length} elapsedMs=${elapsedMs.toFixed(1)} emit=${banner === null ? "empty" : "banner"}`);
     if (banner === null) {
       process.stdout.write("{}\n");
