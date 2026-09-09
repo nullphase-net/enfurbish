@@ -113,12 +113,20 @@ export type ScanOk = {
    * Bash ran, because that is when `files_edited` stops being the whole story --- not
    * only when it is empty. Absent (rather than empty) when git could not answer: no
    * repo, no git, unparseable start timestamp. Empty means git looked and found none.
+   * Capped at `FILES_CHANGED_CAP`; whatever the cap drops is counted in
+   * `files_changed_hidden` rather than discarded, because a truncated list that does
+   * not say it is truncated reads exactly like a complete one.
    */
   files_changed?: string[];
+  /** How many `files_changed` entries the cap dropped. Absent when it dropped none. */
+  files_changed_hidden?: number;
   files_read_count: number;
   degraded?: boolean;
   reason?: string;
 };
+
+/** Rows of `files_changed` a wrap reads before the list stops informing it. */
+export const FILES_CHANGED_CAP = 50;
 
 /**
  * What git says changed under `cwd` since `iso` --- the fallback for `files_edited`.
@@ -149,6 +157,8 @@ export type ScanOk = {
  * the occasional stale one.
  *
  * null means git could not answer. That is not the same fact as an empty list.
+ * The full list comes back uncapped; the caller caps it, because a cap that discards
+ * the count of what it discarded is the silent-truncation this repo bans.
  */
 export function gitChangedSince(cwd: string, iso: string): string[] | null {
   if (!cwd || !(Date.parse(iso) > 0)) return null;
@@ -180,7 +190,7 @@ export function gitChangedSince(cwd: string, iso: string): string[] | null {
       if (m > cutoff) seen.add(rel);
     }
   }
-  return [...seen].sort().slice(0, 50);
+  return [...seen].sort();
 }
 
 /**
@@ -362,7 +372,10 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
     skills_invoked: [...skillsSet],
     files_edited,
     ...(files_edited.length === 0 && (tools.Bash?.calls ?? 0) > 0 ? { files_edited_blind: true } : {}),
-    ...(gitChanged ? { files_changed: gitChanged } : {}),
+    ...(gitChanged ? { files_changed: gitChanged.slice(0, FILES_CHANGED_CAP) } : {}),
+    ...(gitChanged && gitChanged.length > FILES_CHANGED_CAP
+      ? { files_changed_hidden: gitChanged.length - FILES_CHANGED_CAP }
+      : {}),
     files_read_count: filesReadCount,
     ...(degraded ? { degraded: true, reason } : {}),
   };

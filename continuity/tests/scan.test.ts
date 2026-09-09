@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { encodeCwd, findTranscript, gitChangedSince, parseTranscript } from "../lib/scan";
+import { FILES_CHANGED_CAP, encodeCwd, findTranscript, gitChangedSince, parseTranscript } from "../lib/scan";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync, realpathSync, utimesSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -415,4 +415,48 @@ test("gitChangedSince returns null when git cannot answer, which is not []", () 
   expect(gitChangedSince(bare, "2026-08-18T17:00:00-05:00")).toBe(null);
   expect(gitChangedSince("", "2026-08-18T17:00:00-05:00")).toBe(null);
   expect(gitChangedSince(repoAt("2026-08-18T18:00:00-05:00"), "not a timestamp")).toBe(null);
+});
+
+// A cap that drops rows without saying how many reads exactly like a complete list,
+// and this is the field /wrap now treats as its evidence. Both directions: the raw
+// query stays uncapped, and the field that a wrap reads carries the count it dropped.
+test("gitChangedSince returns every changed file, uncapped", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  for (let i = 0; i < FILES_CHANGED_CAP + 5; i++) {
+    writeFileSync(join(root, `f${String(i).padStart(3, "0")}.txt`), "x");
+  }
+  expect(gitChangedSince(root, "2026-08-18T17:00:00-05:00")!.length)
+    .toBe(FILES_CHANGED_CAP + 5 + 1); // +1 for committed.txt
+});
+
+test("files_changed is capped and says how many it hid", async () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  for (let i = 0; i < FILES_CHANGED_CAP + 5; i++) {
+    writeFileSync(join(root, `f${String(i).padStart(3, "0")}.txt`), "x");
+  }
+  const rec = (extra: object) => JSON.stringify({
+    cwd: root, timestamp: "2026-08-18T18:30:00-05:00",
+    sessionId: "77777777-0000-0000-0000-000000000000", ...extra,
+  });
+  const r = await parseTranscript(writeSession([
+    rec({ type: "user", message: { role: "user", content: "go" } }),
+    rec({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] } }),
+  ]));
+  expect(r.files_changed).toHaveLength(FILES_CHANGED_CAP);
+  expect(r.files_changed_hidden).toBe(5); // 55 dirty in the window, 50 shown
+});
+
+test("files_changed_hidden is absent when nothing was hidden", async () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, "one.txt"), "x");
+  const rec = (extra: object) => JSON.stringify({
+    cwd: root, timestamp: "2026-08-18T18:30:00-05:00",
+    sessionId: "77777777-0000-0000-0000-000000000000", ...extra,
+  });
+  const r = await parseTranscript(writeSession([
+    rec({ type: "user", message: { role: "user", content: "go" } }),
+    rec({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] } }),
+  ]));
+  expect(r.files_changed).toEqual(["one.txt"]);
+  expect(r.files_changed_hidden).toBeUndefined();
 });

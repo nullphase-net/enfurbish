@@ -178,8 +178,11 @@ export type Handoff = {
  */
 export function commitsSince(root: string, iso: string | null): number | null {
   if (!iso || !(Date.parse(iso) > 0)) return null;
+  // Bounded because the SessionStart hook calls this, once per handoff, on a path
+  // that must not block the session. A timeout kills the child and leaves `status`
+  // null, which falls through the same branch as "not a repo" and renders as nothing.
   const r = spawnSync("git", ["-C", root, "rev-list", "--count", "HEAD", `--since=${iso}`],
-    { encoding: "utf8" });
+    { encoding: "utf8", timeout: 2000 });
   if (r.status !== 0) return null;
   const n = Number.parseInt(r.stdout.trim(), 10);
   return Number.isFinite(n) ? n : null;
@@ -210,13 +213,13 @@ export function collect(
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
+const plural = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
+
 /**
  * Terse, state-pivoting report. The load-bearing line is the header: when the
  * cwd-local pointer is not the newest one, say so and say by how much, because
  * that is the exact condition under which reading only the local file is wrong.
  */
-const plural = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
-
 export function report(hs: Handoff[], projectRoot: string, now: number): string {
   const head = `${hs.length} handoff${hs.length === 1 ? "" : "s"} · root ${projectRoot}`;
   if (hs.length === 0) return head;
@@ -273,7 +276,15 @@ export function windowSince(root: string, path: string, limit = 25): string {
   const git = (...a: string[]) =>
     spawnSync("git", ["-C", root, ...a], { encoding: "utf8", maxBuffer: 8 << 20 });
   const log = git("log", "--pretty=%h  %s", `--since=${iso}`);
-  if (log.status !== 0) return `not a git repo: ${root} — window unknown`;
+  if (log.status !== 0) {
+    // `git log` also exits non-zero on a repo that has no commits yet. Same class of
+    // answer — the window is unknown either way — but the reason is a different fact
+    // and reporting the wrong one sends the reader looking for a missing `.git`.
+    const why = git("rev-parse", "--git-dir").status === 0
+      ? `no commits yet in ${root}`
+      : `not a git repo: ${root}`;
+    return `${why} — window unknown`;
+  }
 
   // Uncommitted work counts. A session that ended without a wrap is as likely to
   // have left the tree dirty as to have committed, and this repo demonstrated it:
@@ -334,9 +345,15 @@ export function main(
   }
 
   if (flag === "--since") {
-    const path = args[1];
-    if (!path) return process.stderr.write(`${USAGE}\n`), 2;
-    return emit(windowSince(findProjectRoot(path.startsWith("/") ? dirname(path) : process.cwd()), path)), 0;
+    const arg = args[1];
+    if (!arg) return process.stderr.write(`${USAGE}\n`), 2;
+    const root = findProjectRoot(arg.startsWith("/") ? dirname(arg) : process.cwd());
+    // `report` prints paths relative to the project root and /next hands one straight
+    // back here, so a cwd-relative resolve returns `absent` from every subdirectory
+    // session — the exact multi-cwd case the handoff scan exists for. Try cwd first
+    // (a path the user typed is relative to where they typed it), then the root.
+    const path = existsSync(arg) ? arg : join(root, arg);
+    return emit(windowSince(root, path)), 0;
   }
 
   if (flag === "--stamp" || flag === "--check") {

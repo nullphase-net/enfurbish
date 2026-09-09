@@ -134,15 +134,20 @@ if (import.meta.main) {
     const sessionCwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
     const projectRoot = findProjectRoot(sessionCwd);
     const { files, elapsedMs, walks } = scanForNextSessionsWithStats(projectRoot);
+    // collect() spawns a bounded `git rev-list` per handoff. That is subprocess work
+    // on the same blocking path the walk is on, so it belongs in the same budget:
+    // timing only the walk under-reports the hook by exactly the part that can hang.
+    const t0 = performance.now();
     const banner = buildBanner({ sessionCwd, projectRoot, handoffs: collect(sessionCwd, projectRoot, files) });
-    debugLog(`cwd=${sessionCwd} root=${projectRoot} files=${files.length} elapsedMs=${elapsedMs.toFixed(1)} emit=${banner === null ? "empty" : "banner"}`);
+    const totalMs = elapsedMs + (performance.now() - t0);
+    debugLog(`cwd=${sessionCwd} root=${projectRoot} files=${files.length} elapsedMs=${totalMs.toFixed(1)} walkMs=${elapsedMs.toFixed(1)} emit=${banner === null ? "empty" : "banner"}`);
     if (banner === null) {
       process.stdout.write("{}\n");
     } else {
       const slowMsRaw = Number.parseInt(process.env.CONTINUITY_SLOW_MS ?? "500", 10);
       const slowMs = Number.isFinite(slowMsRaw) ? slowMsRaw : 500;
-      const withNote = elapsedMs > slowMs
-        ? banner + formatSlowNote(elapsedMs, walks)
+      const withNote = totalMs > slowMs
+        ? banner + formatSlowNote(totalMs, walks)
         : banner;
       process.stdout.write(JSON.stringify({ systemMessage: withNote }) + "\n");
     }
