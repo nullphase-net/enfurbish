@@ -1,0 +1,59 @@
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 640px;
+    background: #0d1117;
+    color: #e6edf3;
+    font: 400 26px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
+    display: flex; flex-direction: column;
+    justify-content: center;
+    padding: 0 96px;
+    overflow: hidden;
+  }
+  .glow {
+    position: absolute; top: -220px; right: -180px;
+    width: 700px; height: 700px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(85,160,250,.18), transparent 62%);
+  }
+  header { display: flex; align-items: center; gap: 28px; margin-bottom: 14px; }
+  .mark { width: 96px; height: 96px; flex: none; }
+  h1 { font-size: 76px; font-weight: 700; letter-spacing: -2px; }
+  .sub { color: #7d8590; font-size: 27px; margin: 0 0 52px 112px; }
+  ul { list-style: none; display: flex; flex-direction: column; gap: 26px; }
+  li { display: flex; align-items: baseline; gap: 30px; }
+  .name { font-weight: 700; font-size: 34px; width: 210px; flex: none; }
+  .what { color: #9aa4af; font-size: 27px; }
+  .continuity { color: #3ba55d; }
+  .affirm     { color: #e3b341; }
+  .pastiche   { color: #e07fe0; }
+  footer {
+    margin-top: 56px; color: #57606a; font-size: 23px;
+    display: flex; gap: 18px;
+  }
+  .dot { color: #30363d; }
+</style>
+
+<div class="glow"></div>
+
+<header>
+  <svg class="mark" viewBox="0 0 100 100" fill="none"
+       stroke="#55a0fa" stroke-width="10" stroke-linecap="round">
+    <circle cx="50" cy="50" r="32"/>
+    <path d="M50 8 V92"/>
+    <path d="M79 21 L21 79"/>
+  </svg>
+  <h1>enfurbish</h1>
+</header>
+<p class="sub">three Claude Code plugins</p>
+
+<ul>
+  <li><span class="name continuity">continuity</span><span class="what">closes the context gap at session start</span></li>
+  <li><span class="name affirm">affirm</span><span class="what">know which .md files became instructions</span></li>
+  <li><span class="name pastiche">pastiche</span><span class="what">a language, a trickle at a time, while you work</span></li>
+</ul>
+
+<footer>
+  <span>bun / TypeScript</span><span class="dot">•</span>
+  <span>no build step</span><span class="dot">•</span>
+  <span>github.com/nullphase-net/enfurbish</span>
+</footer>
