@@ -5,7 +5,7 @@ description: Affirm, show, or revoke trust in the current project's CLAUDE.md, .
 
 # `/affirm` — affirm project instruction files
 
-`CLAUDE.md`, anything under `.claude/rules/`, and any files they pull in via Claude Code's `@import` syntax are loaded as Claude's system instructions for this project. A malicious or accidental change can silently re-program Claude. `/affirm` is the explicit trust gate: bare `/affirm` shows you what's there; `/affirm -a` records SHA-256 hashes once you've reviewed; `/affirm -r` revokes. The SessionStart hook compares stored hashes on every session start and warns on any mismatch.
+`CLAUDE.md`, anything under `.claude/rules/`, and any files they pull in via Claude Code's `@import` syntax are loaded as Claude's system instructions for this project. A malicious or accidental change can silently re-program Claude. `/affirm` is the explicit trust gate: bare `/affirm` shows you what's there; `/affirm -a` records SHA-256 hashes once you've reviewed; `/affirm -r` revokes; `/affirm --since <iso>` reports only what moved after a timestamp. The SessionStart hook compares stored hashes on every session start and warns on any mismatch.
 
 ## Procedure
 
@@ -36,6 +36,14 @@ bun run "<skill-base-dir>/../../lib/cli.ts" -r
 ```
 
 Relay the output.
+
+### `/affirm --since <iso>` — what changed inside a window
+
+```bash
+bun run "<skill-base-dir>/../../lib/cli.ts" --since <iso>
+```
+
+Relay the output. Read-only. Lists only the tracked files whose mtime falls after `<iso>`, with their affirmation status and the subjects of any commits that touched them in that window; a file that is touched but still hash-matched is listed without a call to action. `continuity`'s `/wrap` calls this with the session's `session_start` so a change the user made themselves gets summarized at the end of the session that made it, rather than surfacing as a trust warning at the start of the next one.
 
 ### `/affirm --help`
 

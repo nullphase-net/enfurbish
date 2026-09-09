@@ -15,11 +15,18 @@ Use when the user wants to pick up where the last session left off and either th
    bun run "<skill-base-dir>/../../lib/handoffs.ts" --cwd "$(pwd)"
    ```
 
-   The report lists every `NEXT_SESSION.md` under the project root, newest first, `*` on the newest and `[local]` on the one in the current cwd. Read the header line before anything else — it names the count and, when the local pointer is not the newest, how far behind it is.
+   The report lists every `NEXT_SESSION.md` under the project root, newest first, `*` on the newest and `[local]` on the one in the current cwd. Read the header line before anything else — it names the count, how far behind the local pointer is when it is not the newest, and how many commits have landed since the newest handoff was written.
 
 2. **Read the pointer the report marks `*`.** Not the local one, unless they are the same file. Cwd varies between sessions in one project — an autonomous run in a subdirectory writes its own handoff — and reading the cwd-local file because it was closest is what cost a session real turns on 2026-08-18.
    - If the local file is not the newest, say so in one line before summarizing: which file you read, and how much staler the local one is.
    - If there are no handoffs at all: tell the user nothing is staged and stop. Don't synthesize a follow-up plan from thin air.
+   - **If the header says commits are behind it, the file describes a repo state that no longer exists.** Get the window before summarizing anything:
+
+     ```bash
+     bun run "<skill-base-dir>/../../lib/handoffs.ts" --since <the file the report marked `*`>
+     ```
+
+     Commits and files that landed after the pointer was written, plus what is still uncommitted. Lead with what changed, and mark any open thread the window already covers as probably-done rather than reading it out as pending. Age measures the file, not the code: a 2026-08-18 session briefed from an accurately-reported 2h52m-old pointer that 14 commits had already obsoleted, and lost its first few turns to work that was already committed. Sessions end without a wrap routinely — treat a stale pointer as the normal case, not an anomaly.
 
 3. **Summarize "Start here" and "Open threads" in 2-3 sentences.**
    - Mention the wrap timestamp from the file header so the user knows how stale it is.

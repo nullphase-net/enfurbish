@@ -56,7 +56,10 @@ If you don't want to go through the skill, run the CLI from a shell in the proje
 bun run <plugin-root>/lib/cli.ts          # show details
 bun run <plugin-root>/lib/cli.ts -a       # record hashes
 bun run <plugin-root>/lib/cli.ts -r       # revoke
+bun run <plugin-root>/lib/cli.ts --since 2026-09-08T18:00:00Z   # what moved in a window
 ```
+
+`--since <iso>` lists only the tracked files whose mtime falls after the timestamp, each with its status and the subjects of any commits that touched it in that window. `continuity`'s `/wrap` runs it with the session's start time, so a change you made yourself gets summarized at the end of the session that made it rather than surfacing as a trust warning at the start of the next one. A file that was touched but still hash-matches is listed with no call to action — prompting there is the alert fatigue the gate exists to prevent.
 
 ## Scope and threat model
 

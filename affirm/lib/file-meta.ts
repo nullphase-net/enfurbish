@@ -38,3 +38,16 @@ export function getGitInfo(projectDir: string, filePath: string): GitInfo {
 
   return { inRepo, lastCommit, dirty };
 }
+
+/**
+ * Subjects of commits touching `filePath` after `iso`, newest first.
+ *
+ * Empty means either no commits in the window or not a repo — for the caller's
+ * purpose (describing a change the user already made) both read the same, and the
+ * file's own mtime is what established that a change happened at all.
+ */
+export function commitsTouching(projectDir: string, filePath: string, iso: string): string[] {
+  const r = git(projectDir, ["log", "--format=%s", `--since=${iso}`, "--", filePath]);
+  if (r.code !== 0) return [];
+  return r.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+}

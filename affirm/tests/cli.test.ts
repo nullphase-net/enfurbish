@@ -198,3 +198,58 @@ test("--apply and --revoke together exit 2 with usage", () => {
   expect(code).toBe(2);
   expect(io.err.join("\n")).toContain("mutually exclusive");
 });
+
+// --- --since: the mtime gate that separates "you did this" from a trust event ---
+
+function projectWithClaudeMd(body: string) {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), body);
+  return { dir, hashPath };
+}
+
+test("--since reports a file touched inside the window and asks for review", () => {
+  const { dir, hashPath } = projectWithClaudeMd("# rules\n");
+  const io = collect();
+  // Window opens before the file was written, so its mtime falls inside it.
+  expect(runCli(["--since", "2020-01-01T00:00:00Z"], opts(dir, hashPath, io))).toBe(0);
+  const out = io.out.join("\n");
+  expect(out).toContain("1 of 1 touched");
+  expect(out).toContain("NEW");
+  expect(out).toContain("run /affirm -a after reviewing");
+});
+
+// The other direction, and the one the seven journal loggings were about: outside
+// the window there must be no prompt at all.
+test("--since says nothing to do when the window opened after the last edit", () => {
+  const { dir, hashPath } = projectWithClaudeMd("# rules\n");
+  const io = collect();
+  expect(runCli(["--since", "2999-01-01T00:00:00Z"], opts(dir, hashPath, io))).toBe(0);
+  const out = io.out.join("\n");
+  expect(out).toContain("0 of 1 instruction file touched");
+  expect(out).not.toContain("run /affirm");
+});
+
+// Touched but unchanged: prompting here is exactly the alert fatigue the gate exists
+// to prevent, so the file is listed and the call to action is not.
+test("--since lists an affirmed file without prompting to re-affirm it", () => {
+  const { dir, hashPath } = projectWithClaudeMd("# rules\n");
+  const approve = collect();
+  runCli(["-a"], opts(dir, hashPath, approve));
+
+  const io = collect();
+  runCli(["--since", "2020-01-01T00:00:00Z"], opts(dir, hashPath, io));
+  const out = io.out.join("\n");
+  expect(out).toContain("1 of 1 touched");
+  expect(out).toContain("affirmed");
+  expect(out).not.toContain("run /affirm -a after reviewing");
+});
+
+test("--since rejects a missing or unparseable timestamp", () => {
+  const { dir, hashPath } = projectWithClaudeMd("# rules\n");
+  const io = collect();
+  expect(runCli(["--since"], opts(dir, hashPath, io))).toBe(2);
+
+  const io2 = collect();
+  expect(runCli(["--since", "yesterday-ish"], opts(dir, hashPath, io2))).toBe(0);
+  expect(io2.out.join("\n")).toContain("unparseable timestamp");
+});

@@ -186,6 +186,10 @@ ${langs}
 
 Re-surface the due items listed below — that is what the learner is forgetting
 right now. Re-teach without ceremony; forgetting is expected, not a failure.
+
+A due item the session gives no opening is a scheduling mismatch, not a retention
+failure. Leave it due rather than forcing it; it rotates back. The test is the one
+the new-term budget already uses: does this session's work touch the term's subject.
 ${freshRule}
 When the learner uses a term themselves, unprompted, they are priming you:
 - Already in the ledger → append a ✓ to its line and restamp it.

@@ -56,7 +56,9 @@ Then read the standing backlog once:
 bun run "<skill-base-dir>/../../lib/journal-append.ts" --journal ~/.claude/tooling-journal.md --actions
 ```
 
-Newest first, with the qualifier the original wrap attached. An action carrying `(recurring, unmoved)` or `(10th repetition)` is the one to act on or explicitly retire — not to log an eleventh time.
+Newest first, with the qualifier the original wrap attached, and any retired actions in a `closed:` block ahead of the open ones. An action carrying `(recurring, unmoved)` or `(10th repetition)` is the one to act on or explicitly retire — not to log an eleventh time.
+
+**Retiring is a write, not a decision you hold in your head.** Put it in the `closed` array of the tool's entry in step 4 and it stops coming back; leave it out and the next wrap re-reads it as open and logs an eleventh. This instruction existed for months with no mechanism behind it, and the result was 312 actions in which nothing was ever closed — one of them re-logged eight times, all eight sitting in the default view.
 
 If `~/.claude/tooling-journal.md` does not exist, both commands report zero — `journal-append.ts` creates it with a header on the first append.
 
@@ -112,12 +114,15 @@ cat <<'JOURNAL' | bun run "<skill-base-dir>/../../lib/journal-append.ts" --journ
       "usage": "6 calls, 2 errors",
       "verdict": "hurt",
       "notes": ["Bullet observation.", "Another one."],
+      "closed": ["the standing action you retired, and why"],
       "action": "concrete improvement idea"
     }
   ]
 }
 JOURNAL
 ```
+
+`closed` is how a standing action leaves the backlog. Omit it on the wraps that retire nothing — most of them.
 
 `usage`, `notes` and `action` are all optional; omit `action` when there genuinely isn't one rather than writing "none". Raw markdown on stdin still appends verbatim, for a retroactive or hand-written entry — but the JSON form is the default, because a format the model reassembles from memory is a format that drifts, and this one measurably did.
 
@@ -158,14 +163,22 @@ Empty stdin is a no-op — the script exits cleanly without touching the journal
    bun run "<skill-base-dir>/../../lib/handoffs.ts" --check "$(pwd)/NEXT_SESSION.md"
    ```
 
-   - `assistant` — content still matches the stamp a wrap wrote. Nothing has touched it since. Proceed to the per-item merge.
+   - `assistant` — content still matches the stamp a wrap wrote. Nothing has touched it since. Proceed to the per-item merge. **`assistant` is not an all-clear on the content**: it says nobody edited the file, not that the file is still true. A pointer stamped `assistant` described a repo 9 commits in the past, and 3 of its 6 threads were dead. `--since` in step 2 is what answers that.
    - `edited` — someone wrote to it after the last stamp. **Leave it alone.** Don't clobber their notes; new next-steps you synthesized go into the retro's "Follow-ups staged" section.
    - `unstamped` — written before this mechanism existed, or by hand. Fall back to the mtime test: mtime ≥ `session_start` ⇒ treat as user-edited and preserve.
 
    The stamp exists because mtime was wrong in both directions. Every wrap writes the file *after* `session_start`, and assistant edits made through Bash (`cp`, a python heredoc) never enter `files_edited` either — so both the original heuristic and its first proposed fix classified the assistant's own work as the user's. A content hash the wrap stamps in is the only signal that survives whichever tool did the writing.
 
 2. **Read it and judge per-item what this session resolved.** For each item under "Open threads" / "Start here" / "Read first" / "Don't forget":
-   - Was the item addressed? Evidence: the file was edited (check `files_edited` from scan), the work appears in commits this session, the retro's "What happened" covers it.
+   - Was the item addressed? Evidence: **`files_changed` from scan** — what git says moved under the cwd since `session_start`, commits plus work still dirty and modified inside the window. That is the field to read. `files_edited` comes from Edit/Write tool records only, so under auto mode, where every write is a heredoc or a patch script, it is empty no matter how much was written; `files_edited_blind` marks that case. Eight consecutive wraps logged `files_edited []` against 6, 2, 14 and 11 real file changes. Never narrate "no files were edited" from either field.
+   - **`files_changed` is repo-scoped, not session-scoped.** It says what is different under the cwd, not who made it different. A concurrent session, a subagent working a different cwd of the same repo, or the user in an editor all land in it; a concurrent session on another branch lands in none of it, since the commit half only reads HEAD. Corroborate a file against the retro or the transcript before writing that this session changed it, and if you cannot, say "changed during the session" rather than "we changed".
+   - If the prior pointer is older than this session, the work that closed an item may have happened in a session that never wrapped. Ask git rather than reading files:
+
+     ```bash
+     bun run "<skill-base-dir>/../../lib/handoffs.ts" --since "$(pwd)/NEXT_SESSION.md"
+     ```
+
+     Commits and files landed after the pointer's own header, plus a count of what is still uncommitted. It answers "which of these are already done?" in one call. `0 commits … still describes HEAD` is the all-clear; `window unknown` means it could not tell and you are back to reading.
    - When in doubt, KEEP the item. False-negatives (carrying a done item) are cheap; false-positives (dropping unfinished work) are expensive.
 
 3. **Build the new file:**
@@ -239,6 +252,16 @@ For each learning, pick the lowest-cost destination that closes the loop. Defaul
 
 Promote to CLAUDE.md only if it should shape every future session — confirm before writing because CLAUDE.md is durable and visible.
 
+**Then re-check affirmation, whether or not this wrap wrote to CLAUDE.md.** If the `affirm` plugin is installed, invoke its skill with the session's `session_start` from step 1:
+
+```
+/affirm --since <session_start>
+```
+
+It gates itself: files untouched inside the session window produce a single `0 of N` line and nothing to do. Invoke the *skill*, not a path — affirm resolves its own lib, and three sessions lost turns to a hardcoded one. If affirm isn't installed, skip this and don't mention it.
+
+Why here rather than at the next session start: a CHANGED warning about a file the user edited themselves this session is pure alert fatigue — by construction they already know. Measured across eight wraps, 6 positives / 2 negatives, and the mtime window separates them cleanly. When the output names a NEW or CHANGED file, put the summary line in the retro rather than asking; two of those eight sessions ended with nobody at the keyboard to answer a prompt.
+
 ### 7. Final report
 
 After everything is written, output a short summary to the user:
@@ -249,6 +272,7 @@ After everything is written, output a short summary to the user:
   Journal:        ~/.claude/tooling-journal.md (appended)
   NEXT_SESSION:   <written|preserved|removed|absent>
   CLAUDE.md:      <none|user-confirmed|project-confirmed>
+  Affirm:         <clean|N changed, re-affirm|not installed>
 $SUGGEST
 ```
 

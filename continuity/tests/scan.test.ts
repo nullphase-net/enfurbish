@@ -1,8 +1,10 @@
 import { test, expect } from "bun:test";
-import { encodeCwd, findTranscript, parseTranscript } from "../lib/scan";
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync, realpathSync } from "node:fs";
+import { FILES_CHANGED_CAP, encodeCwd, findTranscript, gitChangedSince, parseTranscript } from "../lib/scan";
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync, realpathSync, utimesSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { gitInitClean } from "./helpers/git";
 
 test("encodeCwd replaces / with - including leading slash", () => {
   expect(encodeCwd("/Volumes/chonk/projects/claude"))
@@ -303,4 +305,158 @@ test("parseTranscript still credits tool errors back from tool_result records", 
   ]));
   expect(r.tools.Bash?.errors).toBe(1);
   expect(r.turn_count.user).toBe(0);
+});
+
+// The 2026-08-18 wrap counted 10 user turns against 7 real prompts and blamed
+// background-task notifications; all three of the excess were skill bodies. One
+// `/next` reaches the transcript as two user records — the command, then the
+// SKILL.md that loading it injected.
+test("parseTranscript counts a slash command once, not twice with its skill body", async () => {
+  const r = await parseTranscript(writeSession([
+    userRec("<command-message>continuity:next</command-message>\n<command-name>/continuity:next</command-name>"),
+    userRec([{ type: "text", text: "Base directory for this skill: /Users/x/.claude/plugins/cache/enfurbish/continuity/0.6.0/skills/next\n\n# `/next` — manual NEXT_SESSION read\n\nUse when the user wants to pick up where the last session left off." }]),
+    userRec("work it as you like until you're satisfied"),
+  ]));
+  expect(r.turn_count.user).toBe(2);
+  expect(r.skills_invoked).toContain("continuity:next");
+});
+
+// Auto mode routes every write through Bash, so `files_edited` came back empty
+// after ~15 writes on 2026-08-18. Empty-because-nothing-happened and
+// empty-because-invisible are different claims; only one of them is safe to
+// narrate in a retro.
+test("parseTranscript flags files_edited as blind when it is empty and Bash ran", async () => {
+  const bash = (id: string) => JSON.stringify({
+    type: "assistant", cwd: "/repo", timestamp: "2026-08-18T00:00:00.000Z",
+    message: { role: "assistant", content: [{ type: "tool_use", id, name: "Bash", input: {} }] },
+  });
+  const r = await parseTranscript(writeSession([userRec("do it"), bash("t1")]));
+  expect(r.files_edited).toEqual([]);
+  expect(r.files_edited_blind).toBe(true);
+});
+
+test("files_edited_blind is absent when the field is informative", async () => {
+  const edit = JSON.stringify({
+    type: "assistant", cwd: "/repo", timestamp: "2026-08-18T00:00:00.000Z",
+    message: { role: "assistant", content: [{ type: "tool_use", id: "t2", name: "Edit", input: { file_path: "/repo/a.ts" } }] },
+  });
+  const r = await parseTranscript(writeSession([userRec("do it"), edit]));
+  expect(r.files_edited).toEqual(["/repo/a.ts"]);
+  expect(r.files_edited_blind).toBeUndefined();
+});
+
+test("files_edited_blind is absent when the session ran no Bash at all", async () => {
+  const r = await parseTranscript(writeSession([userRec("just a question")]));
+  expect(r.files_edited_blind).toBeUndefined();
+});
+
+// --- gitChangedSince: the fallback for a files_edited that auto mode empties ---
+
+function repoAt(commitIso: string): string {
+  const root = mkdtempSync(join(tmpdir(), "scan-git-"));
+  const fx = gitInitClean(root);
+  try {
+    writeFileSync(join(root, "committed.txt"), "x");
+    spawnSync("git", ["add", "-A"], { cwd: root });
+    spawnSync("git", ["commit", "-q", "-m", "c"], {
+      cwd: root,
+      env: { ...process.env, GIT_COMMITTER_DATE: commitIso, GIT_AUTHOR_DATE: commitIso },
+    });
+  } finally {
+    fx.cleanup();
+  }
+  return root;
+}
+
+test("gitChangedSince finds committed and still-dirty files both", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, "untracked.txt"), "y");
+  writeFileSync(join(root, "committed.txt"), "modified");
+  const got = gitChangedSince(root, "2026-08-18T17:00:00-05:00");
+  expect(got).toEqual(["committed.txt", "untracked.txt"]);
+});
+
+// The other direction: a quiet repo must return an empty list, not a stale one.
+test("gitChangedSince returns [] when nothing changed in the window", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  expect(gitChangedSince(root, "2026-08-18T19:00:00-05:00")).toEqual([]);
+});
+
+// `git status` is not time-bounded: without a filter it reports every dirty file,
+// including work that predates the session entirely. Measured on this repo — 19 dirty
+// files, one of them a version bump a prior session left behind, reported by a session
+// that never touched it.
+test("gitChangedSince excludes dirty files that predate the window", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  const stale = join(root, "left-over.txt");
+  writeFileSync(stale, "from a prior session");
+  const old = new Date("2026-08-18T12:00:00-05:00");
+  utimesSync(stale, old, old);
+
+  writeFileSync(join(root, "this-session.txt"), "now");
+  const got = gitChangedSince(root, "2026-08-18T17:00:00-05:00")!;
+  expect(got).toContain("this-session.txt");
+  expect(got).not.toContain("left-over.txt");
+});
+
+// The other direction: the filter must not swallow a file the session really wrote.
+// A deletion cannot be stat'd at all and is kept rather than dropped.
+test("gitChangedSince keeps in-window edits and un-stattable deletions", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  rmSync(join(root, "committed.txt"));
+  writeFileSync(join(root, "fresh.txt"), "y");
+  const got = gitChangedSince(root, "2026-08-18T17:00:00-05:00")!;
+  expect(got).toContain("committed.txt");
+  expect(got).toContain("fresh.txt");
+});
+
+test("gitChangedSince returns null when git cannot answer, which is not []", () => {
+  const bare = mkdtempSync(join(tmpdir(), "scan-nogit-"));
+  expect(gitChangedSince(bare, "2026-08-18T17:00:00-05:00")).toBe(null);
+  expect(gitChangedSince("", "2026-08-18T17:00:00-05:00")).toBe(null);
+  expect(gitChangedSince(repoAt("2026-08-18T18:00:00-05:00"), "not a timestamp")).toBe(null);
+});
+
+// A cap that drops rows without saying how many reads exactly like a complete list,
+// and this is the field /wrap now treats as its evidence. Both directions: the raw
+// query stays uncapped, and the field that a wrap reads carries the count it dropped.
+test("gitChangedSince returns every changed file, uncapped", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  for (let i = 0; i < FILES_CHANGED_CAP + 5; i++) {
+    writeFileSync(join(root, `f${String(i).padStart(3, "0")}.txt`), "x");
+  }
+  expect(gitChangedSince(root, "2026-08-18T17:00:00-05:00")!.length)
+    .toBe(FILES_CHANGED_CAP + 5 + 1); // +1 for committed.txt
+});
+
+test("files_changed is capped and says how many it hid", async () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  for (let i = 0; i < FILES_CHANGED_CAP + 5; i++) {
+    writeFileSync(join(root, `f${String(i).padStart(3, "0")}.txt`), "x");
+  }
+  const rec = (extra: object) => JSON.stringify({
+    cwd: root, timestamp: "2026-08-18T18:30:00-05:00",
+    sessionId: "77777777-0000-0000-0000-000000000000", ...extra,
+  });
+  const r = await parseTranscript(writeSession([
+    rec({ type: "user", message: { role: "user", content: "go" } }),
+    rec({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] } }),
+  ]));
+  expect(r.files_changed).toHaveLength(FILES_CHANGED_CAP);
+  expect(r.files_changed_hidden).toBe(5); // 55 dirty in the window, 50 shown
+});
+
+test("files_changed_hidden is absent when nothing was hidden", async () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, "one.txt"), "x");
+  const rec = (extra: object) => JSON.stringify({
+    cwd: root, timestamp: "2026-08-18T18:30:00-05:00",
+    sessionId: "77777777-0000-0000-0000-000000000000", ...extra,
+  });
+  const r = await parseTranscript(writeSession([
+    rec({ type: "user", message: { role: "user", content: "go" } }),
+    rec({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] } }),
+  ]));
+  expect(r.files_changed).toEqual(["one.txt"]);
+  expect(r.files_changed_hidden).toBeUndefined();
 });

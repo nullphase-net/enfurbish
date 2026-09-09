@@ -25,6 +25,7 @@ The listing is a CLI you can run yourself:
 ```bash
 bun run lib/handoffs.ts --cwd "$(pwd)"          # every handoff, newest first
 bun run lib/handoffs.ts --check ./NEXT_SESSION.md   # assistant | edited | unstamped
+bun run lib/handoffs.ts --since ./NEXT_SESSION.md   # what landed after its header
 ```
 
 ```
@@ -36,6 +37,18 @@ bun run lib/handoffs.ts --check ./NEXT_SESSION.md   # assistant | edited | unsta
 The header line is the load-bearing one: reading only the cwd-local pointer is wrong exactly
 when it isn't the newest. A trailing `+Nh after header` on a row means the file was edited
 after its own `**Last wrapped:**` was written — mid-session reconciles the header doesn't describe.
+A trailing `+N commits` means the repo moved on after the pointer was written, and the header
+repeats the count for the newest one. Age measures the file; that measures the code it describes,
+and the two come apart exactly when a handoff is most misleading.
+
+`--since <path>` is the evidence behind that count — the commits and files that landed after the
+file's own header, plus how much is still uncommitted. It answers "which of these open threads are
+already done?" in one call, which is the question that costs the most turns when a session ended
+without a wrap. It reports four states and never guesses between them: `N commits`, `0 commits …
+still describes HEAD` (the all-clear), `0 commits · N uncommitted … predates uncommitted work`, and
+`window unknown` (no repo, no commits yet, no header, absent file). Paths are resolved against the
+cwd first and the project root second, so the relative path the listing prints can be handed
+straight back.
 
 ### `SessionStart` hook
 
@@ -90,11 +103,11 @@ bun run lib/journal-append.ts --journal $J --actions --tool continuity
 bun run lib/journal-append.ts --journal $J --recent scan.ts
 ```
 
-`--actions` is the improvement backlog, newest first, carrying the qualifier the original wrap attached (`(recurring, unmoved)`, `(10th repetition)`). `--recent` returns whole sections for one tool. Both match tool names loosely, which is the point: headings and action prefixes are free text a model composed, and they drift.
+`--actions` is the improvement backlog, newest first, carrying the qualifier the original wrap attached (`(recurring, unmoved)`, `(10th repetition)`), with any retired actions in a `closed:` block ahead of the open ones — uncapped, because a reader who never reaches a retired action logs it again. `--recent` returns whole sections for one tool. Both match tool names loosely, which is the point: headings and action prefixes are free text a model composed, and they drift.
 
 How much drift, measured against one real 130-wrap journal: `grep '^- Action:'` reached 143 of 241 action lines, and the 98 it missed skewed toward the long-running ones (`Action (recurring, unmoved)` ×17, `(10th repetition)` ×3). `grep '^### continuity'` reached 109 of 134 sections, across 35 distinct spellings of one plugin's name. Your journal will differ; the failure mode won't.
 
-Entries are written the same way — `/wrap` hands `journal-append.ts` JSON and `formatEntry` renders the on-disk shape. Raw markdown on stdin still appends verbatim for retroactive or hand-written entries.
+Entries are written the same way — `/wrap` hands `journal-append.ts` JSON and `formatEntry` renders the on-disk shape. Raw markdown on stdin still appends verbatim for retroactive or hand-written entries. A `closed` array on a tool's entry renders `- Closed: …` lines, which is how a standing action leaves the backlog; nothing matches a `Closed:` line back to its `Action:`, a reader does, so name the action in prose.
 
 ## What `/wrap` measures
 
