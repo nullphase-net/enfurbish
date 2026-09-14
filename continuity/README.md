@@ -41,6 +41,11 @@ A trailing `+N commits` means the repo moved on after the pointer was written, a
 repeats the count for the newest one. Age measures the file; that measures the code it describes,
 and the two come apart exactly when a handoff is most misleading.
 
+The other two markers are about the file itself. `header Nh ahead of file` is the reverse of
+`after header` and always a bug: a header cannot postdate the file it heads, and every window
+derived from one that does is short by exactly the error. `oversize:NNKB` means the pointer is
+past 16 KB — `/wrap` sees it before the merge, which is the last point anything can be trimmed.
+
 `--since <path>` is the evidence behind that count — the commits and files that landed after the
 file's own header, plus how much is still uncommitted. It answers "which of these open threads are
 already done?" in one call, which is the question that costs the most turns when a session ended
@@ -149,7 +154,7 @@ One sentence on the most important thing to pick up.
 <!-- wrap-generation 0123456789abcdef -->
 ```
 
-The header block is rendered by `handoffs.ts --header`, not typed — the same file parses `**Last wrapped:**` back out, so one function owns both ends. The body beneath it is prose the wrap composes; nothing parses it.
+The header block is rendered by `handoffs.ts --header`, not typed — the same file parses `**Last wrapped:**` back out, so one function owns both ends. The timestamp isn't an argument either: the command stamps the clock, because a wrap that composed one from memory wrote UTC clock-time carrying a CDT offset and every `--since` window derived from it was five hours short, silently. The body beneath it is prose the wrap composes; nothing parses it.
 
 The trailing `wrap-generation` line is a hash of the file's own content. `/wrap` writes it, and the next wrap compares it back: matching means nothing has touched the file since, so the per-item merge may proceed; not matching means someone hand-edited it and their notes must be preserved. It replaced an mtime test that misclassified the assistant's own writes as the user's.
 

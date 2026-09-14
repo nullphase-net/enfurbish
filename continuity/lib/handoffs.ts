@@ -24,6 +24,10 @@ import { getIgnoredDirs } from "./gitignore";
 import { humanizeDelta } from "./humanize";
 
 const MAX_DEPTH = 4;
+// `/next` is told to summarize aggressively past this; nothing ever told the writer.
+// This project's own pointer reached 70 KB, +10 KB of it in one session under
+// `/wrap`'s hand, while the only complaint lived in the skill that reads the file.
+const OVERSIZE = 16 * 1024;
 const IGNORE_DIRS = new Set([
   "node_modules", ".git", "vendor", "dist", "build", "target",
   "__pycache__", ".venv", "venv",
@@ -161,6 +165,9 @@ export type Handoff = {
   commitsSince: number | null;
   local: boolean;
   ownership: Ownership;
+  /** Bytes on disk. Only the writer can act on an oversized pointer, and `/wrap`
+   *  reads this report before its merge — the last moment trimming is cheap. */
+  size: number;
 };
 
 /**
@@ -208,6 +215,7 @@ export function collect(
         commitsSince: commitsSince(projectRoot, wrapped),
         local: f.path === localPath,
         ownership: ownership(text),
+        size: Buffer.byteLength(text),
       };
     })
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -241,15 +249,19 @@ export function report(hs: Handoff[], projectRoot: string, now: number): string 
     const age = `${humanizeDelta(now - h.mtimeMs)} ago`.padEnd(9);
     const wrapped = h.wrapped ?? "no header";
     // A pointer whose file moved after its own `Last wrapped` header carries
-    // mid-session edits the header does not describe.
-    const drift = h.wrapped && Date.parse(h.wrapped) > 0
-      ? h.mtimeMs - Date.parse(h.wrapped) > 60_000
-        ? `  +${humanizeDelta(h.mtimeMs - Date.parse(h.wrapped))} after header`
-        : ""
+    // mid-session edits the header does not describe. The other sign is a broken
+    // header: both numbers have always been printed on this line and nothing
+    // compared them, so a wrap that wrote UTC clock-time wearing a CDT offset
+    // rendered `<1s ago  wrapped <5h from now>` without comment, and every window
+    // derived from that header was short by the error.
+    const skew = h.wrapped && Date.parse(h.wrapped) > 0 ? h.mtimeMs - Date.parse(h.wrapped) : 0;
+    const drift = skew > 60_000 ? `  +${humanizeDelta(skew)} after header`
+      : skew < -60_000 ? `  header ${humanizeDelta(-skew)} ahead of file`
       : "";
     const own = h.ownership === "unstamped" ? "" : `  stamp:${h.ownership}`;
     const since = h.commitsSince ? `  +${plural(h.commitsSince)}` : "";
-    return `${h === newest ? "*" : " "} ${name}  ${age} wrapped ${wrapped}${own}${drift}${since}`;
+    const big = h.size > OVERSIZE ? `  oversize:${Math.round(h.size / 1024)}KB` : "";
+    return `${h === newest ? "*" : " "} ${name}  ${age} wrapped ${wrapped}${own}${drift}${since}${big}`;
   });
   return [head + pivot + behind, ...lines].join("\n");
 }
@@ -272,6 +284,12 @@ export function windowSince(root: string, path: string, limit = 25): string {
   if (!existsSync(path)) return `absent ${path}`;
   const iso = LAST_WRAPPED.exec(readFileSync(path, "utf8"))?.[1] ?? null;
   if (!iso || !(Date.parse(iso) > 0)) return `no **Last wrapped:** header in ${path} — window unknown`;
+  // A header cannot postdate the file it heads. When one does, every window derived
+  // from it is short by exactly the error and says nothing: a 5h-fast header here
+  // reported 3 commits where 11 had landed. `--header` can no longer emit one, but
+  // the files it already wrote are still on disk, and a wrong window reads like a
+  // right one. Refusing is the only honest answer — the real cutoff is unknown.
+  if (Date.parse(iso) > Date.now() + 60_000) return `header ${iso} postdates now — window unknown`;
 
   const git = (...a: string[]) =>
     spawnSync("git", ["-C", root, ...a], { encoding: "utf8", maxBuffer: 8 << 20 });
@@ -333,8 +351,8 @@ export function windowSince(root: string, path: string, limit = 25): string {
 const USAGE = `usage: handoffs.ts [--cwd <dir>]        list NEXT_SESSION.md files under the project root
        --stamp <path>              rewrite <path> with a current wrap-generation stamp
        --check <path>              assistant | edited | unstamped
-       --header <slug> <iso-ts> <sid8> [retro]
-                                   print the canonical NEXT_SESSION.md header block
+       --header <slug> <sid8> [retro]
+                                   print the canonical header block, timestamped now
        --since <path>              commits and files landed after <path>'s header`;
 
 export function main(
@@ -345,8 +363,14 @@ export function main(
   const flag = args[0];
 
   if (flag === "--header") {
-    const [, slug, wrapped, session, retro] = args;
-    if (!slug || !wrapped || !session) return process.stderr.write(`${USAGE}\n`), 2;
+    const [, slug, session, retro] = args;
+    if (!slug || !session) return process.stderr.write(`${USAGE}\n`), 2;
+    // The timestamp is not an argument. A model composing one from memory wrote UTC
+    // clock-time carrying a CDT offset into this project's pointer — 5h fast — and
+    // `--since` under-reported off it until a human noticed. The clock is
+    // deterministic, so the clock supplies it. UTC because assembling a local offset
+    // is the same arithmetic that produced the bug.
+    const wrapped = new Date(now).toISOString().replace(/\.\d+Z$/, "Z");
     return emit(formatHeader({ slug, wrapped, session, retro })), 0;
   }
 

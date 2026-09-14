@@ -157,6 +157,8 @@ Empty stdin is a no-op — the script exits cleanly without touching the journal
 
    Reconcile the one in *this* cwd. If the report shows a newer sibling, note it in the retro's Handoff section — that's another session's pointer and not yours to merge.
 
+   `oversize:NNKB` on a line means that pointer is past 16 KB. Trim it during the merge below — drop resolved threads, collapse the narrated ones — because this is the last moment anything can. `/next` only gets to summarize around it; one of these reached 70 KB, +10 KB of it in a single wrap.
+
 1. **Ask who last wrote it, then decide whether to preserve.**
 
    ```bash
@@ -164,13 +166,14 @@ Empty stdin is a no-op — the script exits cleanly without touching the journal
    ```
 
    - `assistant` — content still matches the stamp a wrap wrote. Nothing has touched it since. Proceed to the per-item merge. **`assistant` is not an all-clear on the content**: it says nobody edited the file, not that the file is still true. A pointer stamped `assistant` described a repo 9 commits in the past, and 3 of its 6 threads were dead. `--since` in step 2 is what answers that.
-   - `edited` — someone wrote to it after the last stamp. **Leave it alone.** Don't clobber their notes; new next-steps you synthesized go into the retro's "Follow-ups staged" section.
+   - `edited` — someone wrote to it after the last stamp. **Leave it alone unless your own transcript shows the edits were yours.** A mid-session reconcile that rewrote the file without re-stamping is byte-identical to a user edit, and the model doing that reconcile had no reason to have loaded this skill — so "edited" does not mean "theirs". Followed literally on 2026-09-14 this branch would have discarded an entire session's handoff work, none of it the user's. When the notes *are* theirs, don't clobber them; new next-steps you synthesized go into the retro's "Follow-ups staged" section.
    - `unstamped` — written before this mechanism existed, or by hand. Fall back to the mtime test: mtime ≥ `session_start` ⇒ treat as user-edited and preserve.
 
    The stamp exists because mtime was wrong in both directions. Every wrap writes the file *after* `session_start`, and assistant edits made through Bash (`cp`, a python heredoc) never enter `files_edited` either — so both the original heuristic and its first proposed fix classified the assistant's own work as the user's. A content hash the wrap stamps in is the only signal that survives whichever tool did the writing.
 
 2. **Read it and judge per-item what this session resolved.** For each item under "Open threads" / "Start here" / "Read first" / "Don't forget":
    - Was the item addressed? Evidence: **`files_changed` from scan** — what git says moved under the cwd since `session_start`, commits plus work still dirty and modified inside the window. That is the field to read. `files_edited` comes from Edit/Write tool records only, so under auto mode, where every write is a heredoc or a patch script, it is empty no matter how much was written; `files_edited_blind` marks that case. Eight consecutive wraps logged `files_edited []` against 6, 2, 14 and 11 real file changes. Never narrate "no files were edited" from either field.
+   - **`files_changed` is git-derived, so a gitignored path is never in it.** A project that gitignores its own `NEXT_SESSION.md`, `IDEAS.md` or scratch notes will show four rewrites of one as nothing at all; there it only looked right because `.handoff-backup/` happened to be committed, which is that repo's convention and nothing the skill guarantees. Absence from `files_changed` is not evidence an item went untouched.
    - **`files_changed` is repo-scoped, not session-scoped.** It says what is different under the cwd, not who made it different. A concurrent session, a subagent working a different cwd of the same repo, or the user in an editor all land in it; a concurrent session on another branch lands in none of it, since the commit half only reads HEAD. Corroborate a file against the retro or the transcript before writing that this session changed it, and if you cannot, say "changed during the session" rather than "we changed".
    - If the prior pointer is older than this session, the work that closed an item may have happened in a session that never wrapped. Ask git rather than reading files:
 
@@ -211,10 +214,10 @@ Empty stdin is a no-op — the script exits cleanly without touching the journal
 
 Note in the retro's Handoff section which items carried forward, which were resolved, and which were added — so the user can audit your judgment.
 
-**The header is rendered, not typed.** `handoffs.ts` parses `**Last wrapped:**` back out of this file, so the same file writes it:
+**The header is rendered, not typed, and so is its timestamp.** `handoffs.ts` parses `**Last wrapped:**` back out of this file, so the same file writes it — and it stamps the clock itself, because a timestamp composed from memory got the offset wrong (UTC clock-time wearing a CDT offset, 5h fast) and every `--since` window derived from it under-reported silently:
 
 ```bash
-bun run "<skill-base-dir>/../../lib/handoffs.ts" --header "<cwd-slug>" "<ISO ts>" "<sessionid8>" \
+bun run "<skill-base-dir>/../../lib/handoffs.ts" --header "<cwd-slug>" "<sessionid8>" \
   "~/.claude/sessions/YYYY-MM-DD-<cwd-slug>-<sessionid8>.md"
 ```
 

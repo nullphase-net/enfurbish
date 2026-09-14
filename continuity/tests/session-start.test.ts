@@ -301,6 +301,7 @@ const HO = (over: Partial<Handoff> = {}): Handoff => ({
   commitsSince: null,
   local: true,
   ownership: "assistant",
+  size: 512,
   ...over,
 });
 

@@ -89,6 +89,52 @@ test("report on a single local pointer carries no staleness pivot", () => {
   expect(out).toContain("no header");
 });
 
+// A header 5h in the future is what a wrap wrote here on 2026-09-14 — UTC clock-time
+// carrying a CDT offset. `report` printed the age and the header side by side and
+// compared neither, so the line read as healthy and `--since` under-reported off it.
+test("report says so when the header postdates the file it heads", () => {
+  const root = mkdtempSync(join(tmpdir(), "handoffs-"));
+  writeFileSync(join(root, "CLAUDE.md"), "# marker\n");
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, "# Next session — proj\n\n**Last wrapped:** 2026-08-18T14:00:00-05:00 (session abc12345)\n");
+  const t = Date.parse("2026-08-18T09:00:00-05:00") / 1000;
+  utimesSync(p, t, t);
+  const out = report(collect(root, root), root, Date.parse("2026-08-18T10:00:00-05:00"));
+  expect(out).toContain("header 5h ahead of file");
+  expect(out).not.toContain("after header");
+});
+
+// The other direction of the same comparison: a file that moved after its header is
+// a mid-session reconcile, which is normal and reads differently.
+test("report distinguishes a file edited after its header from a header ahead of its file", () => {
+  const root = mkdtempSync(join(tmpdir(), "handoffs-"));
+  writeFileSync(join(root, "CLAUDE.md"), "# marker\n");
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, "# Next session — proj\n\n**Last wrapped:** 2026-08-18T09:00:00-05:00 (session abc12345)\n");
+  const t = Date.parse("2026-08-18T14:00:00-05:00") / 1000;
+  utimesSync(p, t, t);
+  const out = report(collect(root, root), root, Date.parse("2026-08-18T15:00:00-05:00"));
+  expect(out).toContain("+5h after header");
+  expect(out).not.toContain("ahead of file");
+});
+
+// `/next` was told to summarize aggressively past 16 KB; `/wrap`, which writes the
+// file, was told nothing. One reached 70 KB. The marker rides the report both read.
+test("report marks a pointer past 16KB and stays quiet under it", () => {
+  const root = mkdtempSync(join(tmpdir(), "handoffs-"));
+  writeFileSync(join(root, "CLAUDE.md"), "# marker\n");
+  const p = join(root, "NEXT_SESSION.md");
+
+  writeFileSync(p, "x".repeat(16 * 1024));
+  expect(report(collect(root, root), root, Date.now())).not.toContain("oversize");
+
+  writeFileSync(p, "x".repeat(16 * 1024 + 1));
+  expect(report(collect(root, root), root, Date.now())).toContain("oversize:16KB");
+
+  writeFileSync(p, "x".repeat(70 * 1024));
+  expect(report(collect(root, root), root, Date.now())).toContain("oversize:70KB");
+});
+
 test("report on an empty project states the count rather than staying silent", () => {
   const root = mkdtempSync(join(tmpdir(), "handoffs-"));
   writeFileSync(join(root, "CLAUDE.md"), "# marker\n");
@@ -143,8 +189,26 @@ test("formatHeader marks a quick wrap as having no retro", () => {
     .toContain("**Retro:** none (-q)");
 });
 
-test("--header requires slug, timestamp and session", () => {
+test("--header requires slug and session", () => {
   expect(main(["--header", "enfurbish"], Date.now(), () => {})).toBe(2);
+});
+
+// The timestamp is not an argument and cannot be one. A model composed it from
+// memory and produced UTC clock-time wearing a CDT offset — 5h fast — which every
+// window downstream then derived from, silently short by the error.
+test("--header stamps the clock rather than accepting a timestamp", () => {
+  const out: string[] = [];
+  const now = Date.parse("2026-09-14T10:05:00Z");
+  expect(main(["--header", "enfurbish", "204f692f"], now, s => void out.push(s))).toBe(0);
+  expect(out[0]).toContain("**Last wrapped:** 2026-09-14T10:05:00Z (session 204f692f)");
+  expect(out[0]).toContain("**Retro:** none (-q)");
+
+  // The third positional is the retro path, not a timestamp — a caller still typing
+  // the old four-arg form would otherwise land its ISO string in the session slot.
+  out.length = 0;
+  main(["--header", "enfurbish", "204f692f", "~/r.md"], now, s => void out.push(s));
+  expect(out[0]).toContain("(session 204f692f)");
+  expect(out[0]).toContain("**Retro:** ~/r.md");
 });
 
 // --- commitsSince ----------------------------------------------------------
@@ -272,6 +336,18 @@ test("windowSince does not count the handoff itself as work it predates", () => 
   expect(out).toContain("0 commits");
   expect(out).toContain("still describes HEAD");
   expect(out).not.toContain("uncommitted");
+});
+
+// The measured cost of trusting one: a header 5h fast reported 3 commits where 11
+// had landed. `--header` can no longer write one, but files that already carry one
+// are on disk, and a short window reads exactly like a correct one.
+test("windowSince refuses a header that postdates now", () => {
+  const root = repoWithCommits(COMMITS);
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, HANDOFF("2099-01-01T00:00:00Z"));
+  const out = windowSince(root, p);
+  expect(out).toContain("window unknown");
+  expect(out).toContain("postdates now");
 });
 
 test("windowSince refuses rather than guesses — absent file, no header, no repo", () => {
