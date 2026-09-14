@@ -190,6 +190,10 @@ export function gitChangedSince(cwd: string, iso: string): string[] | null {
       if (m > cutoff) seen.add(rel);
     }
   }
+  // The wrap writes this cwd's pointer inside the session window, so it always
+  // qualified and reported the scan's own artifact as session work. A pointer in a
+  // subdirectory belongs to another cwd's wrap and stays.
+  seen.delete("NEXT_SESSION.md");
   return [...seen].sort();
 }
 

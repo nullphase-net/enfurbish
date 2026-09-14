@@ -410,6 +410,28 @@ test("gitChangedSince keeps in-window edits and un-stattable deletions", () => {
   expect(got).toContain("fresh.txt");
 });
 
+// The wrap writes NEXT_SESSION.md inside the session window, so the scan's own
+// artifact came back as evidence of what the session changed (the second of two
+// wraps on 2026-09-10 listed it beside eleven real edits; a wrap-only session
+// would list nothing else). A pointer in a subdirectory is another cwd's and is
+// not this scan's to drop.
+test("gitChangedSince does not report the cwd's own NEXT_SESSION.md as session work", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  // sub/ must be tracked, or git collapses the untracked dir to "sub/" and hides the pointer's name
+  mkdirSync(join(root, "sub"));
+  writeFileSync(join(root, "sub", "tracked.txt"), "x");
+  spawnSync("git", ["add", "-A"], { cwd: root });
+  spawnSync("git", ["commit", "-q", "-m", "sub"], {
+    cwd: root,
+    env: { ...process.env, GIT_COMMITTER_DATE: "2026-08-18T18:30:00-05:00", GIT_AUTHOR_DATE: "2026-08-18T18:30:00-05:00" },
+  });
+  writeFileSync(join(root, "NEXT_SESSION.md"), "# Next session — proj\n");
+  writeFileSync(join(root, "real.txt"), "session work");
+  writeFileSync(join(root, "sub", "NEXT_SESSION.md"), "# Next session — sub\n");
+  const got = gitChangedSince(root, "2026-08-18T19:00:00-05:00");
+  expect(got).toEqual(["real.txt", "sub/NEXT_SESSION.md"]);
+});
+
 test("gitChangedSince returns null when git cannot answer, which is not []", () => {
   const bare = mkdtempSync(join(tmpdir(), "scan-nogit-"));
   expect(gitChangedSince(bare, "2026-08-18T17:00:00-05:00")).toBe(null);

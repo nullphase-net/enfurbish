@@ -18,7 +18,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { getIgnoredDirs } from "./gitignore";
 import { humanizeDelta } from "./humanize";
@@ -296,11 +296,17 @@ export function windowSince(root: string, path: string, limit = 25): string {
   // `git status` is not time-bounded, so an unfiltered count reports work the handoff
   // author already knew about as if it had appeared since. It is still repo-scoped —
   // it cannot tell whose work it is, only that the handoff does not describe it.
+  //
+  // The handoff itself is excluded: the wrap renders the header, then writes the
+  // file, so the pointer is always newer than its own timestamp and counted itself
+  // as "1 uncommitted — predates uncommitted work" on every fresh wrap.
   const st = git("status", "--porcelain", "-z");
   const cutoff = Date.parse(iso);
+  const self = resolve(path);
   const dirty = st.status !== 0 ? 0 : st.stdout.split("\0").filter(rec => {
     if (!rec) return false;
     const rel = /^[ MADRCU?!]{2} /.test(rec) ? rec.slice(3) : rec;
+    if (resolve(root, rel) === self) return false;
     try { return statSync(join(root, rel)).mtimeMs > cutoff; } catch { return true; }
   }).length;
   const dirtyNote = dirty ? ` · ${dirty} uncommitted` : "";

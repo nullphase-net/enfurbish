@@ -251,11 +251,27 @@ test("windowSince counts uncommitted work, which is what an unwrapped session le
   const root = repoWithCommits(COMMITS);
   const p = join(root, "NEXT_SESSION.md");
   writeFileSync(p, HANDOFF("2026-08-18T20:00:00-05:00"));
+  writeFileSync(join(root, "f.txt"), "edited after the wrap, never committed");
   const out = windowSince(root, p);
   expect(out).toContain("0 commits");
   expect(out).toContain("1 uncommitted");
   expect(out).toContain("predates uncommitted work");
   expect(out).not.toContain("still describes HEAD");
+});
+
+// The wrap writes the pointer after rendering its header, so the pointer is
+// always newer than its own timestamp. Counted, it read as "1 uncommitted —
+// handoff predates uncommitted work" on every fresh wrap (two in a row on
+// 2026-09-10), and the all-clear could never appear. The previous test used
+// to pass on exactly that self-count.
+test("windowSince does not count the handoff itself as work it predates", () => {
+  const root = repoWithCommits(COMMITS);
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, HANDOFF("2026-08-18T20:00:00-05:00"));
+  const out = windowSince(root, p);
+  expect(out).toContain("0 commits");
+  expect(out).toContain("still describes HEAD");
+  expect(out).not.toContain("uncommitted");
 });
 
 test("windowSince refuses rather than guesses — absent file, no header, no repo", () => {
