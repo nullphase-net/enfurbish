@@ -229,6 +229,17 @@ describe("buildContext", () => {
     expect(out).not.toContain("register");
   });
 
+  // recordar (to remember) went out as "ya está recordado" for "recorded". The
+  // session had an opening for "remember" and took the due term by its shape
+  // instead: a meaning failure the scheduling-mismatch rule cannot catch.
+  test("binds a due term to its gloss, so a look-alike English word is a false friend, not an opening", () => {
+    const out = buildContext({
+      cfg, due: stalest(parseLedger(LEDGER), 2), notes: "", pluginRoot: "/p",
+    });
+    expect(out).toContain("gloss");
+    expect(out).toContain("false friend");
+  });
+
   test("does not suppress new vocabulary in favor of the due list", () => {
     const out = buildContext({
       cfg, due: stalest(parseLedger(LEDGER), 2), notes: "", pluginRoot: "/p",

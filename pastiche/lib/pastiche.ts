@@ -190,6 +190,10 @@ right now. Re-teach without ceremony; forgetting is expected, not a failure.
 A due item the session gives no opening is a scheduling mismatch, not a retention
 failure. Leave it due rather than forcing it; it rotates back. The test is the one
 the new-term budget already uses: does this session's work touch the term's subject.
+
+A term fits only where its gloss fits. A due word that looks like the English word
+your sentence needs but glosses differently is a false friend: the shape is the
+trap, not the opening. Use it in the glossed meaning or leave it due.
 ${freshRule}
 When the learner uses a term themselves, unprompted, they are priming you:
 - Already in the ledger → append a ✓ to its line and restamp it.
