@@ -11,6 +11,7 @@ function fileMeta(over: Partial<FileMeta> = {}): FileMeta {
     depth: 0,
     via: null,
     outOfTree: false,
+    global: false,
     mtimeMs: 1000,
     git: { inRepo: false, lastCommit: null, dirty: false },
     ...over,
@@ -29,7 +30,7 @@ function runHook(env: Record<string, string>, hashPath?: string, stdin?: string)
     env: {
       ...process.env,
       ...env,
-      ...(hashPath ? { HOME: hashPath } : {}),
+      ...(hashPath ? { HOME: hashPath, AFFIRM_GLOBAL_DIR: join(hashPath, ".claude") } : {}),
     },
     input: stdin,
   });
@@ -96,7 +97,7 @@ test("hook banner includes modified detail for a NEW file (end-to-end)", () => {
   writeFileSync(join(dir, "CLAUDE.md"), "v1");
   const res = spawnSync("bun", ["run", SCRIPT], {
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home },
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, AFFIRM_GLOBAL_DIR: join(home, ".claude") },
   });
   const json = JSON.parse(res.stdout);
   expect(json.systemMessage).toContain("✦ CLAUDE.md  [NEW — unaffirmed]");
@@ -119,10 +120,10 @@ test("banner marks all files NEW when hash store is empty", () => {
 
   const res = spawnSync("bun", ["run", SCRIPT], {
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home },
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, AFFIRM_GLOBAL_DIR: join(home, ".claude") },
   });
   const json = JSON.parse(res.stdout);
-  expect(json.systemMessage).toContain("Affirm: instruction files in this project:");
+  expect(json.systemMessage).toContain("Affirm: instruction files in scope:");
   expect(json.systemMessage).toContain("✦ CLAUDE.md  [NEW — unaffirmed]");
   expect(json.systemMessage).toContain("Review unaffirmed files");
   expect(json.systemMessage).toContain("/affirm");
@@ -140,7 +141,7 @@ test("banner marks affirmed files with ✓ and omits warning", () => {
 
   const res = spawnSync("bun", ["run", SCRIPT], {
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home },
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, AFFIRM_GLOBAL_DIR: join(home, ".claude") },
   });
   const json = JSON.parse(res.stdout);
   expect(json.systemMessage).toContain("✓ CLAUDE.md");
@@ -163,7 +164,7 @@ test("banner marks tampered files CHANGED and warns", () => {
 
   const res = spawnSync("bun", ["run", SCRIPT], {
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home },
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, AFFIRM_GLOBAL_DIR: join(home, ".claude") },
   });
   const json = JSON.parse(res.stdout);
   expect(json.systemMessage).toContain("✧ CLAUDE.md  [CHANGED — unaffirmed]");
@@ -180,7 +181,7 @@ test("CLAUDE_PROJECT_DIR overrides process.cwd()", () => {
   const res = spawnSync("bun", ["run", SCRIPT], {
     encoding: "utf8",
     cwd: launchDir,
-    env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir, HOME: home },
+    env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir, HOME: home, AFFIRM_GLOBAL_DIR: join(home, ".claude") },
   });
   const json = JSON.parse(res.stdout);
   expect(json.systemMessage).toContain("✦ CLAUDE.md");
@@ -233,8 +234,84 @@ test("banner is prefixed with 'Affirm:'", () => {
 
   const res = spawnSync("bun", ["run", SCRIPT], {
     encoding: "utf8",
-    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home },
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, AFFIRM_GLOBAL_DIR: join(home, ".claude") },
   });
   const json = JSON.parse(res.stdout);
   expect(json.systemMessage.startsWith("Affirm:")).toBe(true);
+});
+
+// ---------- global (~/.claude) files ----------
+
+test("buildBanner omits an affirmed global file but keeps the project's", () => {
+  const proj = "/proj/CLAUDE.md";
+  const glob = "/home/.claude/CLAUDE.md";
+  const msg = buildBanner({
+    projectDir: "/proj",
+    classification: { approved: [proj, glob], added: [], changed: [] },
+    meta: { [proj]: fileMeta(), [glob]: fileMeta({ outOfTree: true, global: true }) },
+    deep: [],
+    now: 1000,
+  });
+  expect(msg).toContain("✓ CLAUDE.md");
+  expect(msg).not.toContain(".claude/CLAUDE.md");
+});
+
+test("buildBanner shows an unaffirmed global file, marked (global)", () => {
+  const proj = "/proj/CLAUDE.md";
+  const glob = "/home/.claude/CLAUDE.md";
+  const msg = buildBanner({
+    projectDir: "/proj",
+    classification: { approved: [proj], added: [], changed: [glob] },
+    meta: { [proj]: fileMeta(), [glob]: fileMeta({ outOfTree: true, global: true }) },
+    deep: [],
+    now: 1000,
+  });
+  expect(msg).toContain("/home/.claude/CLAUDE.md (global)  [CHANGED — unaffirmed]");
+  expect(msg).not.toContain("(out-of-tree)");
+  expect(msg).toContain("Review unaffirmed files");
+});
+
+test("buildBanner returns empty when the only files are affirmed globals", () => {
+  const glob = "/home/.claude/CLAUDE.md";
+  const msg = buildBanner({
+    projectDir: "/proj",
+    classification: { approved: [glob], added: [], changed: [] },
+    meta: { [glob]: fileMeta({ outOfTree: true, global: true }) },
+    deep: [],
+    now: 1000,
+  });
+  expect(msg).toBe("");
+});
+
+test("hook emits {} for a project with no files of its own and an affirmed global", () => {
+  const home = mkDir("affirm-home-global-");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const globalMd = join(home, ".claude", "CLAUDE.md");
+  writeFileSync(globalMd, "global rules");
+  saveHashes({ [globalMd]: sha256OfFile(globalMd) }, join(home, ".claude", "affirm-hashes.json"));
+
+  const dir = mkDir("affirm-proj-global-");
+  const res = spawnSync("bun", ["run", SCRIPT], {
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, AFFIRM_GLOBAL_DIR: join(home, ".claude") },
+  });
+  expect(JSON.parse(res.stdout)).toEqual({});
+});
+
+test("hook surfaces a changed global file end-to-end", () => {
+  const home = mkDir("affirm-home-globalchg-");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const globalMd = join(home, ".claude", "CLAUDE.md");
+  writeFileSync(globalMd, "v1");
+  saveHashes({ [globalMd]: sha256OfFile(globalMd) }, join(home, ".claude", "affirm-hashes.json"));
+  writeFileSync(globalMd, "v2 — someone edited it");
+
+  const dir = mkDir("affirm-proj-globalchg-");
+  const res = spawnSync("bun", ["run", SCRIPT], {
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, AFFIRM_GLOBAL_DIR: join(home, ".claude") },
+  });
+  const json = JSON.parse(res.stdout);
+  expect(json.systemMessage).toContain("(global)  [CHANGED — unaffirmed]");
+  expect(json.systemMessage).toContain("Review unaffirmed files");
 });

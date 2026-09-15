@@ -1,11 +1,10 @@
 #!/usr/bin/env bun
-import { dirname, relative } from "node:path";
+import { dirname } from "node:path";
 import {
   HASH_FILE,
   approveAll,
   loadHashes,
   normalizeProjectDir,
-  revokeProject,
   sha256OfFile,
 } from "./affirm";
 import { buildInstructionGraph, displayPath, type InstructionGraph } from "./imports";
@@ -16,7 +15,6 @@ function usage(): string {
     "Usage:",
     "  affirm                show status, mtime, and git info for instruction files in cwd",
     "  affirm -a, --apply    record SHA-256 hashes (the attestation)",
-    "  affirm -r, --revoke   remove affirmation for files in cwd",
     "  affirm --since <iso>  which instruction files changed after <iso>, and how",
     "  affirm -h, --help     show this message",
   ].join("\n");
@@ -51,7 +49,8 @@ function renderDetails(
     const git = fmtGit(getGitInfo(dirname(gf.path), gf.path)); // cwd = file's dir → correct repo, incl. out-of-tree
     if (git !== null) out(`    git:      ${git}`);
     if (gf.via) out(`    import:   from ${displayPath(projectDir, gf.via)} (depth ${gf.depth})`);
-    if (gf.outOfTree) out(`    scope:    out-of-tree`);
+    if (gf.global) out(`    scope:    global`);
+    else if (gf.outOfTree) out(`    scope:    out-of-tree`);
     out("");
   }
   if (graph.deep.length > 0) {
@@ -59,7 +58,7 @@ function renderDetails(
     out(`@imports beyond depth 2 (not tracked): ${list}`);
     out("");
   }
-  out("Run /affirm -a to record current hashes, /affirm -r to revoke.");
+  out("Run /affirm -a to record current hashes.");
 }
 
 /**
@@ -136,12 +135,6 @@ export function runCli(argv: string[], opts: CliOpts): number {
     opts.out(usage());
     return 0;
   }
-  const wantsApply = args.has("-a") || args.has("--apply");
-  const wantsRevoke = args.has("-r") || args.has("--revoke");
-  if (wantsApply && wantsRevoke) {
-    opts.err(`-a/--apply and -r/--revoke are mutually exclusive\n\n${usage()}`);
-    return 2;
-  }
   const arg = argv[0];
 
   const hashPath = opts.hashPath ?? HASH_FILE;
@@ -152,24 +145,11 @@ export function runCli(argv: string[], opts: CliOpts): number {
     return 0;
   }
 
-  if (arg === "--revoke" || arg === "-r") {
-    const { revoked } = revokeProject(projectDir, hashPath);
-    if (revoked.length === 0) {
-      opts.out(`No prior affirmations to revoke in ${projectDir}.`);
-    } else {
-      opts.out(`Revoked ${revoked.length} affirmation${revoked.length === 1 ? "" : "s"} in ${projectDir}:`);
-      for (const f of revoked) opts.out(`  ${relative(projectDir, f)}`);
-      opts.out("");
-      opts.out("Next session will surface these as unaffirmed.");
-    }
-    return 0;
-  }
-
   if (arg === "-a" || arg === "--apply") {
     const { approved } = approveAll(projectDir, hashPath);
     opts.out(`Affirmed ${approved.length} file${approved.length === 1 ? "" : "s"} in ${projectDir}:`);
     for (const { path, hash } of approved) {
-      opts.out(`  ${relative(projectDir, path)}  (${hash.slice(0, 12)}…)`);
+      opts.out(`  ${displayPath(projectDir, path)}  (${hash.slice(0, 12)}…)`);
     }
     return 0;
   }

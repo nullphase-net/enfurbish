@@ -26,8 +26,8 @@ export function sha256OfFile(path: string): string {
 }
 
 // Roots (CLAUDE.md + .claude/rules/**) plus any files they @import, transitively.
-// The full graph (depth/provenance/out-of-tree) lives in ./imports; classify/approve/
-// revoke only need the flat path list.
+// The full graph (depth/provenance/out-of-tree/global) lives in ./imports; classify and
+// approve only need the flat path list.
 export function collectInstructionFiles(projectDir: string): string[] {
   return buildInstructionGraph(projectDir)
     .files.map((f) => f.path)
@@ -81,18 +81,4 @@ export function approveAll(projectDir: string, hashPath: string = HASH_FILE): { 
   }
   saveHashes(stored, hashPath);
   return { approved };
-}
-
-export function revokeProject(projectDir: string, hashPath: string = HASH_FILE): { revoked: string[] } {
-  const files = collectInstructionFiles(projectDir);
-  const stored = loadHashes(hashPath);
-  const revoked: string[] = [];
-  for (const f of files) {
-    if (f in stored) {
-      delete stored[f];
-      revoked.push(f);
-    }
-  }
-  saveHashes(stored, hashPath);
-  return { revoked };
 }

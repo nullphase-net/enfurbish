@@ -18,6 +18,21 @@ function opts(cwd: string, hashPath: string, io: CollectedIO) {
   };
 }
 
+// In-process tests must not read the developer's real ~/.claude — os.homedir() is cached
+// at startup in Bun, so HOME cannot be moved from here. AFFIRM_GLOBAL_DIR is read per call.
+const EMPTY_GLOBAL = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-noglobal-")));
+process.env.AFFIRM_GLOBAL_DIR = EMPTY_GLOBAL;
+
+/** Point the global root at `dir` for one test, then put it back. */
+function withGlobalDir<T>(dir: string, fn: () => T): T {
+  process.env.AFFIRM_GLOBAL_DIR = dir;
+  try {
+    return fn();
+  } finally {
+    process.env.AFFIRM_GLOBAL_DIR = EMPTY_GLOBAL;
+  }
+}
+
 function mkProject() {
   const dir = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-cli-proj-")));
   const hashPath = join(normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-cli-store-"))), "hashes.json");
@@ -119,28 +134,6 @@ test("--show is no longer recognized", () => {
   expect(io.err.join("\n")).toContain("Unknown argument: --show");
 });
 
-test("--revoke removes affirmations for this project only", () => {
-  const { dir, hashPath } = mkProject();
-  writeFileSync(join(dir, "CLAUDE.md"), "rules");
-  saveHashes({
-    [join(dir, "CLAUDE.md")]: sha256OfFile(join(dir, "CLAUDE.md")),
-    "/other/proj/CLAUDE.md": "deadbeef",
-  }, hashPath);
-
-  const io = collect();
-  runCli(["--revoke"], opts(dir, hashPath, io));
-  expect(io.out.join("\n")).toContain("Revoked 1 affirmation");
-  expect(loadHashes(hashPath)).toEqual({ "/other/proj/CLAUDE.md": "deadbeef" });
-});
-
-test("--revoke reports no-op when nothing was affirmed", () => {
-  const { dir, hashPath } = mkProject();
-  writeFileSync(join(dir, "CLAUDE.md"), "rules");
-  const io = collect();
-  runCli(["--revoke"], opts(dir, hashPath, io));
-  expect(io.out.join("\n")).toContain("No prior affirmations to revoke");
-});
-
 test("unknown argument exits 2 with usage on stderr", () => {
   const { dir, hashPath } = mkProject();
   writeFileSync(join(dir, "CLAUDE.md"), "rules");
@@ -170,34 +163,6 @@ test("--apply records hashes (long form of -a)", () => {
   expect(io.out.join("\n")).toContain("Affirmed 1 file");
 });
 
-test("-r revokes (short form of --revoke)", () => {
-  const { dir, hashPath } = mkProject();
-  writeFileSync(join(dir, "CLAUDE.md"), "rules");
-  saveHashes({ [join(dir, "CLAUDE.md")]: sha256OfFile(join(dir, "CLAUDE.md")) }, hashPath);
-  const io = collect();
-  const code = runCli(["-r"], opts(dir, hashPath, io));
-  expect(code).toBe(0);
-  expect(io.out.join("\n")).toContain("Revoked 1 affirmation");
-});
-
-test("-a and -r together exit 2 with usage", () => {
-  const { dir, hashPath } = mkProject();
-  writeFileSync(join(dir, "CLAUDE.md"), "rules");
-  const io = collect();
-  const code = runCli(["-a", "-r"], opts(dir, hashPath, io));
-  expect(code).toBe(2);
-  expect(io.err.join("\n")).toContain("mutually exclusive");
-  expect(io.err.join("\n")).toContain("Usage:");
-});
-
-test("--apply and --revoke together exit 2 with usage", () => {
-  const { dir, hashPath } = mkProject();
-  writeFileSync(join(dir, "CLAUDE.md"), "rules");
-  const io = collect();
-  const code = runCli(["--apply", "--revoke"], opts(dir, hashPath, io));
-  expect(code).toBe(2);
-  expect(io.err.join("\n")).toContain("mutually exclusive");
-});
 
 // --- --since: the mtime gate that separates "you did this" from a trust event ---
 
@@ -252,4 +217,32 @@ test("--since rejects a missing or unparseable timestamp", () => {
   const io2 = collect();
   expect(runCli(["--since", "yesterday-ish"], opts(dir, hashPath, io2))).toBe(0);
   expect(io2.out.join("\n")).toContain("unparseable timestamp");
+});
+
+test("-a renders a global file as ~/… , not a ../../.. climb", () => {
+  const g = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-cli-gdir-")));
+  writeFileSync(join(g, "CLAUDE.md"), "global root");
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "project root");
+  const io = collect();
+
+  withGlobalDir(g, () => runCli(["-a"], opts(dir, hashPath, io)));
+  const out = io.out.join("\n");
+  expect(out).toContain("Affirmed 2 files");
+  expect(out).not.toContain("..");
+  expect(out).toContain(join(g, "CLAUDE.md"));
+  expect(loadHashes(hashPath)[join(g, "CLAUDE.md")]).toBeString();
+});
+
+test("bare affirm labels a global file scope: global", () => {
+  const g = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-cli-gscope-")));
+  writeFileSync(join(g, "CLAUDE.md"), "global root");
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "project root");
+  const io = collect();
+
+  withGlobalDir(g, () => runCli([], opts(dir, hashPath, io)));
+  const out = io.out.join("\n");
+  expect(out).toContain("scope:    global");
+  expect(out).not.toContain("scope:    out-of-tree");
 });

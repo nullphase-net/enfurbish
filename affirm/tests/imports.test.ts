@@ -10,6 +10,25 @@ import {
   MAX_IMPORT_DEPTH,
 } from "../lib/imports";
 
+function normalizeProjectDir(d: string): string {
+  return realpathSync(d);
+}
+
+// In-process tests must not read the developer's real ~/.claude — os.homedir() is cached
+// at startup in Bun, so HOME cannot be moved from here. AFFIRM_GLOBAL_DIR is read per call.
+const EMPTY_GLOBAL = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-noglobal-")));
+process.env.AFFIRM_GLOBAL_DIR = EMPTY_GLOBAL;
+
+/** Point the global root at `dir` for one test, then put it back. */
+function withGlobalDir<T>(dir: string, fn: () => T): T {
+  process.env.AFFIRM_GLOBAL_DIR = dir;
+  try {
+    return fn();
+  } finally {
+    process.env.AFFIRM_GLOBAL_DIR = EMPTY_GLOBAL;
+  }
+}
+
 // ---------- parseImports ----------
 
 test("parseImports extracts a single @import", () => {
@@ -79,7 +98,7 @@ test("graph: root CLAUDE.md only", () => {
   writeFileSync(join(dir, "CLAUDE.md"), "no imports here");
   const g = buildInstructionGraph(dir);
   expect(g.files).toEqual([
-    { path: join(dir, "CLAUDE.md"), depth: 0, via: null, outOfTree: false },
+    { path: join(dir, "CLAUDE.md"), depth: 0, via: null, outOfTree: false, global: false },
   ]);
   expect(g.deep).toEqual([]);
 });
@@ -148,4 +167,58 @@ test("graph: relative imports resolve against the importing file", () => {
 
 test("MAX_IMPORT_DEPTH is 2", () => {
   expect(MAX_IMPORT_DEPTH).toBe(2);
+});
+
+// ---------- global roots ----------
+
+function mkGlobal(prefix: string): string {
+  const g = normalizeProjectDir(mkdtempSync(join(tmpdir(), prefix)));
+  return g;
+}
+
+test("global CLAUDE.md and rules/ are collected and marked global", () => {
+  const g = mkGlobal("affirm-gdir-");
+  writeFileSync(join(g, "CLAUDE.md"), "global root");
+  mkdirSync(join(g, "rules"), { recursive: true });
+  writeFileSync(join(g, "rules", "style.md"), "global rule");
+  const proj = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-gproj-")));
+  writeFileSync(join(proj, "CLAUDE.md"), "project root");
+
+  const files = withGlobalDir(g, () => buildInstructionGraph(proj).files);
+  const byPath = Object.fromEntries(files.map((f) => [f.path, f]));
+  expect(byPath[join(proj, "CLAUDE.md")]!.global).toBe(false);
+  expect(byPath[join(g, "CLAUDE.md")]!.global).toBe(true);
+  expect(byPath[join(g, "rules", "style.md")]!.global).toBe(true);
+});
+
+test("a global root's @imports inherit global", () => {
+  const g = mkGlobal("affirm-gdir-imp-");
+  writeFileSync(join(g, "CLAUDE.md"), "see @extra.md");
+  writeFileSync(join(g, "extra.md"), "more global rules");
+  const proj = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-gproj-imp-")));
+  writeFileSync(join(proj, "CLAUDE.md"), "project root");
+
+  const files = withGlobalDir(g, () => buildInstructionGraph(proj).files);
+  const extra = files.find((f) => f.path === join(g, "extra.md"));
+  expect(extra?.global).toBe(true);
+  expect(extra?.via).toBe(join(g, "CLAUDE.md"));
+});
+
+test("a file only a project root imports out of the global dir is not global", () => {
+  const g = mkGlobal("affirm-gdir-shared-");
+  writeFileSync(join(g, "shared.md"), "pulled in deliberately"); // not a global root
+  const proj = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-gproj-shared-")));
+  writeFileSync(join(proj, "CLAUDE.md"), `see @${join(g, "shared.md")}`);
+
+  const files = withGlobalDir(g, () => buildInstructionGraph(proj).files);
+  const shared = files.find((f) => f.path === join(g, "shared.md"));
+  expect(shared?.global).toBe(false);
+  expect(shared?.outOfTree).toBe(true);
+});
+
+test("no global dir contents means no global files", () => {
+  const proj = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-gproj-none-")));
+  writeFileSync(join(proj, "CLAUDE.md"), "project root");
+  const files = buildInstructionGraph(proj).files;
+  expect(files.map((f) => f.global)).toEqual([false]);
 });

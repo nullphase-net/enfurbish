@@ -11,6 +11,7 @@ export type GraphFile = {
   depth: number;
   via: string | null; // referrer (absolute), null for roots
   outOfTree: boolean; // not under the project root
+  global: boolean; // reached from a global (~/.claude) root, not a project one
 };
 
 export type DeepImport = {
@@ -96,13 +97,33 @@ function walkRules(dir: string, out: string[]) {
   }
 }
 
-function collectRoots(projectRoot: string): string[] {
+/** Where the user-global instruction files live. `AFFIRM_GLOBAL_DIR` overrides it for tests. */
+export function globalDir(): string {
+  return process.env.AFFIRM_GLOBAL_DIR || join(homedir(), ".claude");
+}
+
+function rootsAt(claudeMd: string, rulesDir: string): string[] {
   const out: string[] = [];
-  const top = join(projectRoot, "CLAUDE.md");
-  if (existsSync(top) && safeIsFile(top)) out.push(top);
-  const rulesDir = join(projectRoot, ".claude", "rules");
+  if (existsSync(claudeMd) && safeIsFile(claudeMd)) out.push(claudeMd);
   if (existsSync(rulesDir) && safeIsDir(rulesDir)) walkRules(rulesDir, out);
   return out.sort();
+}
+
+type Root = { path: string; global: boolean };
+
+// Project roots come first so that when the same file is reachable both ways, the
+// BFS's first visit is the project one and the file stays visible in the banner.
+// The exception is a file that IS a global root: it is queued at depth 0 and wins
+// over a project's depth-1 import of it, which is right — it loads in every project
+// regardless, so a ✓ line for it is the repetition the gating exists to cut.
+function collectRoots(projectRoot: string): Root[] {
+  const proj = rootsAt(join(projectRoot, "CLAUDE.md"), join(projectRoot, ".claude", "rules"));
+  const g = globalDir();
+  const glob = rootsAt(join(g, "CLAUDE.md"), join(g, "rules"));
+  return [
+    ...proj.map((path) => ({ path, global: false })),
+    ...glob.map((path) => ({ path, global: true })),
+  ];
 }
 
 function importsOf(file: string): string[] {
@@ -121,21 +142,27 @@ export function buildInstructionGraph(projectDir: string, maxDepth = MAX_IMPORT_
   const visited = new Set<string>();
   const deepSeen = new Set<string>();
 
-  type Node = { path: string; depth: number; via: string | null };
-  const queue: Node[] = collectRoots(root).map((p) => ({ path: realOrSelf(p), depth: 0, via: null }));
+  type Node = { path: string; depth: number; via: string | null; global: boolean };
+  const queue: Node[] = collectRoots(root).map((r) => ({
+    path: realOrSelf(r.path),
+    depth: 0,
+    via: null,
+    global: r.global,
+  }));
 
   while (queue.length > 0) {
     const node = queue.shift()!;
     if (visited.has(node.path)) continue;
     visited.add(node.path);
     const outOfTree = !(node.path === root || node.path.startsWith(root + sep));
-    files.push({ path: node.path, depth: node.depth, via: node.via, outOfTree });
+    files.push({ path: node.path, depth: node.depth, via: node.via, outOfTree, global: node.global });
 
     for (const raw of importsOf(node.path)) {
       const resolved = realOrSelf(resolveImport(raw, dirname(node.path)));
       if (!safeIsFile(resolved)) continue; // skip missing / non-file imports
       if (node.depth < maxDepth) {
-        if (!visited.has(resolved)) queue.push({ path: resolved, depth: node.depth + 1, via: node.path });
+        if (!visited.has(resolved))
+          queue.push({ path: resolved, depth: node.depth + 1, via: node.path, global: node.global });
       } else if (!visited.has(resolved) && !deepSeen.has(resolved)) {
         // beyond the follow cap: report it, don't hash it
         deepSeen.add(resolved);

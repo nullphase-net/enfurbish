@@ -12,6 +12,7 @@ export type FileMeta = {
   depth: number;
   via: string | null;
   outOfTree: boolean;
+  global: boolean;
   mtimeMs: number | null;
   git: GitInfo;
 };
@@ -24,12 +25,15 @@ export type BannerInput = {
   now: number;
 };
 
-// `@from <ref>` / `(out-of-tree)` provenance, shown on every state.
+// `@from <ref>` / `(global)` / `(out-of-tree)` provenance, shown on every state.
+// A global root is out of the tree too, but that is its normal place — `(out-of-tree)`
+// reads as a warning about an import that escaped, so globals get their own word.
 function annot(projectDir: string, m: FileMeta | undefined): string {
   if (!m) return "";
   let a = "";
   if (m.via) a += ` ← @from ${displayPath(projectDir, m.via)}`;
-  if (m.outOfTree) a += " (out-of-tree)";
+  if (m.global) a += " (global)";
+  else if (m.outOfTree) a += " (out-of-tree)";
   return a;
 }
 
@@ -58,8 +62,13 @@ export function buildBanner(input: BannerInput): string {
   const { projectDir, classification, meta, deep, now } = input;
   const { approved, added, changed } = classification;
 
-  let msg = "Affirm: instruction files in this project:\n";
-  for (const f of approved) {
+  // Global files are silent while affirmed: they are identical in every project, so a
+  // ✓ line for one is repetition in every banner. They still surface as ✦/✧ below.
+  const visible = approved.filter((f) => !meta[f]?.global);
+  if (visible.length === 0 && added.length === 0 && changed.length === 0) return "";
+
+  let msg = "Affirm: instruction files in scope:\n";
+  for (const f of visible) {
     msg += `  ✓ ${displayPath(projectDir, f)}${annot(projectDir, meta[f])}\n`;
   }
   for (const f of added) {
@@ -127,6 +136,7 @@ if (import.meta.main) {
         depth: gf.depth,
         via: gf.via,
         outOfTree: gf.outOfTree,
+        global: gf.global,
         mtimeMs: null,
         git: { inRepo: false, lastCommit: null, dirty: false },
       };
@@ -138,7 +148,9 @@ if (import.meta.main) {
     }
 
     const systemMessage = buildBanner({ projectDir, classification, meta, deep: graph.deep, now: Date.now() });
-    process.stdout.write(JSON.stringify({ systemMessage }) + "\n");
+    // Nothing to say: a project with no instruction files of its own and every global
+    // affirmed would otherwise get a header with no lines under it.
+    process.stdout.write((systemMessage ? JSON.stringify({ systemMessage }) : "{}") + "\n");
     process.exit(0);
   } catch {
     process.stdout.write("{}\n");

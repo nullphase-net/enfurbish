@@ -8,10 +8,24 @@ import {
   collectInstructionFiles,
   loadHashes,
   normalizeProjectDir,
-  revokeProject,
   saveHashes,
   sha256OfFile,
 } from "../lib/affirm";
+
+// In-process tests must not read the developer's real ~/.claude — os.homedir() is cached
+// at startup in Bun, so HOME cannot be moved from here. AFFIRM_GLOBAL_DIR is read per call.
+const EMPTY_GLOBAL = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-noglobal-")));
+process.env.AFFIRM_GLOBAL_DIR = EMPTY_GLOBAL;
+
+/** Point the global root at `dir` for one test, then put it back. */
+function withGlobalDir<T>(dir: string, fn: () => T): T {
+  process.env.AFFIRM_GLOBAL_DIR = dir;
+  try {
+    return fn();
+  } finally {
+    process.env.AFFIRM_GLOBAL_DIR = EMPTY_GLOBAL;
+  }
+}
 
 function mkProject(): { dir: string; hashPath: string } {
   const dir = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-proj-")));
@@ -127,20 +141,3 @@ test("approveAll preserves entries for other projects", () => {
   expect(loadHashes(hashPath)["/other/proj/CLAUDE.md"]).toBe("deadbeef");
 });
 
-test("revokeProject removes only this project's entries", () => {
-  const { dir, hashPath } = mkProject();
-  writeFileSync(join(dir, "CLAUDE.md"), "rules");
-  approveAll(dir, hashPath);
-  saveHashes({ ...loadHashes(hashPath), "/other/proj/CLAUDE.md": "deadbeef" }, hashPath);
-
-  const { revoked } = revokeProject(dir, hashPath);
-  expect(revoked).toEqual([join(dir, "CLAUDE.md")]);
-  expect(loadHashes(hashPath)).toEqual({ "/other/proj/CLAUDE.md": "deadbeef" });
-});
-
-test("revokeProject is a no-op when nothing was affirmed", () => {
-  const { dir, hashPath } = mkProject();
-  writeFileSync(join(dir, "CLAUDE.md"), "rules");
-  const { revoked } = revokeProject(dir, hashPath);
-  expect(revoked).toEqual([]);
-});

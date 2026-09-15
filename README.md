@@ -23,7 +23,7 @@ A speed-bump against prompt injection through `CLAUDE.md`, `.claude/rules/*`, an
 
 - **`SessionStart` hook** lists project instruction files and warns on any unaffirmed or modified file.
 - **`/affirm`** shows what's in scope with status, mtime, and git provenance.
-- **`/affirm -a`** records SHA-256 hashes after you've reviewed; **`-r`** revokes.
+- **`/affirm -a`** records SHA-256 hashes after you've reviewed. Scope covers the project's `CLAUDE.md` / `.claude/rules/*` and the user-global ones under `~/.claude/`; globals stay out of the banner while they still match.
 - **`--since <iso>`** lists only what moved inside a window. `continuity`'s `/wrap` runs it with the session's start time, so a change you made yourself is summarized at the end of that session rather than surfacing as a trust warning at the start of the next one.
 
 See [affirm/README.md](./affirm/README.md) for the threat model and storage details.
