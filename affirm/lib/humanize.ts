@@ -1,11 +1,20 @@
 /**
  * Format a duration in milliseconds as a compact human-readable delta.
- * Returns the largest two non-zero units (e.g., "3d 4h", "5m 12s").
- * Drops units finer than the second-largest unit (e.g., "1d 2h 30m" → "1d 2h").
- * Edge cases: 0 → "0s", negative → "0s" (clock skew), <1s but >0 → "<1s".
+ * Returns the largest non-zero unit plus the one ADJACENT to it — not the
+ * largest two non-zero units. When the adjacent unit is zero it is dropped and
+ * nothing finer takes its place, so the second term is lost rather than
+ * substituted:
  *
- * Vendored from continuity/lib/humanize.ts — plugins duplicate lib code rather
- * than share it (see CLAUDE.md). Keep in sync by hand if the original changes.
+ *   1d 2h 30m → "1d 2h"     adjacent unit non-zero, both shown
+ *   1d 0h 30m → "1d"        adjacent unit zero, the 30m is NOT promoted
+ *   2h 0m 5s  → "2h"        same shape one unit down
+ *   3d 4h     → "3d 4h"
+ *   5m 12s    → "5m 12s"
+ *
+ * That is intended — it keeps the output to one magnitude step — but it means a
+ * delta can render shorter than it is, and a caller comparing two rendered
+ * strings is not comparing two durations.
+ * Edge cases: 0 → "0s", negative → "0s" (clock skew), <1s but >0 → "<1s".
  */
 export function humanizeDelta(deltaMs: number): string {
   if (deltaMs <= 0) return "0s";

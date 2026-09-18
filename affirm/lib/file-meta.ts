@@ -15,8 +15,25 @@ export type GitInfo = {
   dirty: boolean;
 };
 
+/**
+ * Every git call in this plugin routes through here, so one bound covers all of
+ * them — three per NEW/CHANGED file, from a SessionStart hook that must not
+ * block the session. It was the last uncapped git subprocess in the stack;
+ * `continuity`'s `commitsSince` (2000ms) and `gitignore` (5000ms) already had
+ * theirs, and "hooks never block the session" rested on this one line.
+ *
+ * A timeout kills the child and leaves `status` null, so it falls through the
+ * same `?? 1` branch as a genuine git failure. That conflation is deliberate
+ * here and only here: every caller treats a non-zero code as "no information",
+ * which degrades the banner to showing less rather than showing something
+ * wrong. Do not add a caller that reads code 1 as a specific cause.
+ *
+ * The hang path itself is untested — reproducing it needs a git that blocks,
+ * which nothing here can arrange cheaply. Neither existing timeout in this repo
+ * is tested either; this is a known gap, not an oversight.
+ */
 function git(cwd: string, args: string[]): { code: number; stdout: string } {
-  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  const r = spawnSync("git", args, { cwd, encoding: "utf8", timeout: 2000 });
   return { code: r.status ?? 1, stdout: r.stdout ?? "" };
 }
 
