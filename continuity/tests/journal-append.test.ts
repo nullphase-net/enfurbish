@@ -65,3 +65,54 @@ test("no-op on empty stdin (don't truncate journal)", () => {
   expect(res.status).toBe(0);
   expect(readFileSync(journal, "utf8")).toContain("foo");
 });
+
+// --- arg validation --------------------------------------------------------
+// `--recent` with no value parsed to "", which `matching()` reads as "no
+// filter": a flag asking about one tool reported all 731 sections. Both
+// directions are asserted — the empty value must fail AND a real one must still
+// work — because a guard that rejects everything reads as working too.
+
+function cli(journal: string, ...args: string[]) {
+  return spawnSync("bun", ["run", SCRIPT, "--journal", journal, ...args], { encoding: "utf8" });
+}
+
+const SECTIONS = `${HEADER_MATCH}
+
+## 2026-09-18T10:00:00Z  •  proj  •  abcd1234
+
+### pastiche (SessionStart hook)  •  1 fire  •  verdict: helped
+- a note
+- Action: do the thing
+
+### continuity:wrap (skill)  •  1 scan  •  verdict: helped
+- another note
+`;
+
+function seeded(): string {
+  const j = join(mkdtempSync(join(tmpdir(), "journal-args-")), "journal.md");
+  writeFileSync(j, SECTIONS);
+  return j;
+}
+
+test("--recent with no value is arg misuse, not a wildcard over the whole journal", () => {
+  const r = cli(seeded(), "--recent");
+  expect(r.status).toBe(2);
+  expect(r.stderr).toContain("--recent needs a tool name");
+  expect(r.stdout).not.toContain("sections");
+});
+
+test("--recent with a whitespace-only value is rejected the same way", () => {
+  expect(cli(seeded(), "--recent", "   ").status).toBe(2);
+});
+
+test("--recent with a real tool name still reports", () => {
+  const r = cli(seeded(), "--recent", "pastiche");
+  expect(r.status).toBe(0);
+  expect(r.stdout).toContain("pastiche");
+});
+
+test("--actions takes no value and is unaffected by the guard", () => {
+  const r = cli(seeded(), "--actions");
+  expect(r.status).toBe(0);
+  expect(r.stdout).toContain("do the thing");
+});

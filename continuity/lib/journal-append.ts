@@ -251,6 +251,13 @@ if (import.meta.main) {
   const read = () => (existsSync(journal) ? readFileSync(journal, "utf8") : "");
 
   if ("actions" in args || "recent" in args) {
+    // `--recent` with no value parses to "", which `matching()` reads as "no
+    // filter" and reports the whole journal — 731 sections against a flag that
+    // asked about one tool. An empty needle is arg misuse, not a wildcard.
+    if ("recent" in args && !args.recent.trim()) {
+      process.stderr.write(`--recent needs a tool name\n${USAGE}\n`);
+      process.exit(2);
+    }
     const limit = Number.parseInt(args.limit || "", 10);
     const secs = parseSections(read());
     process.stdout.write(("recent" in args

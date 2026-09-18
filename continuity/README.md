@@ -30,9 +30,9 @@ bun run lib/handoffs.ts --since ./NEXT_SESSION.md   # what landed after its head
 ```
 
 ```
-2 handoffs · root ~/projects/zerotrace · local is 1d 10h staler than newest
-* sub/NEXT_SESSION.md      8h 39m ago wrapped 2026-08-18T09:00:00-05:00  stamp:assistant
-  NEXT_SESSION.md [local]  1d 18h ago wrapped 2026-08-16T22:45:00-05:00
+2 handoffs · root /Volumes/chonk/projects/zerotrace · local is 1d 10h staler than newest · newest 7 commits behind
+* sub/NEXT_SESSION.md      8h 39m ago wrapped 2026-08-18T09:00:00-05:00  stamp:assistant  +1h 54m after header  +7 commits
+  NEXT_SESSION.md [local]  1d 18h ago wrapped 2026-08-16T22:45:00-05:00  oversize:21KB
 ```
 
 The header line is the load-bearing one: reading only the cwd-local pointer is wrong exactly

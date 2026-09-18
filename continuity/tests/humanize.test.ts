@@ -48,3 +48,14 @@ describe("humanizeDelta", () => {
     expect(humanizeDelta(14 * 86400_000)).toBe("14d");
   });
 });
+
+// The doc comment claimed "largest two non-zero units" for a function that
+// returns the largest plus the ADJACENT one. These are the cases that separate
+// the two readings: under the old claim every one of them would carry a second
+// term. Locking them down so the comment and the behaviour cannot drift apart
+// again silently.
+test("a zero adjacent unit is dropped, not replaced by the next non-zero one", () => {
+  expect(humanizeDelta(24 * 3600e3 + 30 * 60e3)).toBe("1d");
+  expect(humanizeDelta(2 * 3600e3 + 5e3)).toBe("2h");
+  expect(humanizeDelta(26 * 3600e3 + 30 * 60e3)).toBe("1d 2h");
+});

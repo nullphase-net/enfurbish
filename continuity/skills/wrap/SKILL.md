@@ -159,6 +159,10 @@ Empty stdin is a no-op — the script exits cleanly without touching the journal
 
    Reconcile the one in *this* cwd. If the report shows a newer sibling, note it in the retro's Handoff section — that's another session's pointer and not yours to merge.
 
+   **`newest N commits behind` in the header, and `+N commits` on a line, are the numbers step 5.2 goes on to need.** They say the repo moved after that pointer was written, which is the whole reason a resolved item can be sitting in it unmarked. Read them here, before you read the file, so the per-item pass below already knows how much of the pointer it should distrust. A high count with `stamp:assistant` is the normal shape of a session that ended without wrapping — the file is untouched and out of date at the same time, and those are not in tension.
+
+   `+Nh Nm after header` means the file moved after its own `**Last wrapped:**` line, so the stated wrap time is not its real age; trust the content over the header. `header Nh ahead of file` is the same comparison failing the other way and means the header's timestamp is wrong, which makes every window derived from it wrong too.
+
    `oversize:NNKB` on a line means that pointer is past 16 KB. Trim it during the merge below — drop resolved threads, collapse the narrated ones — because this is the last moment anything can. `/next` only gets to summarize around it; one of these reached 70 KB, +10 KB of it in a single wrap.
 
 1. **Ask who last wrote it, then decide whether to preserve.**
