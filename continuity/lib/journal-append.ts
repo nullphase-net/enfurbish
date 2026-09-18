@@ -165,6 +165,20 @@ function row(a: Action): string {
   return `${a.entry.slice(0, 10)}  ${clip(a.tool, 34).padEnd(34)}  ${a.qualifier ? a.qualifier + " " : ""}${clip(a.text, 100)}`;
 }
 
+/**
+ * How many of the OLDEST open actions the default view always keeps visible.
+ *
+ * Recency alone made the backlog write-only. At 20 rows against 336 actions an
+ * item left the view about four days after it was logged and was never shown
+ * again — and an action nobody sees is one nobody can retire, which is why 132
+ * sessions produced 5 closes. Measured on that same journal: 336 rows were 276
+ * distinct ideas and only 1 of the 20 rows on screen was a repeat of another,
+ * so this is not a duplication problem that grouping would fix — it is 93% of
+ * the list being invisible. Five is answerable inside one wrap and small enough
+ * not to crowd the recent head.
+ */
+const STALE_ROWS = 5;
+
 export function reportActions(secs: Section[], tool: string | undefined, limit: number): string {
   const hit = matching(secs, tool);
   const acts = findActions(hit).reverse();
@@ -173,16 +187,22 @@ export function reportActions(secs: Section[], tool: string | undefined, limit: 
   const head = `${acts.length} action${acts.length === 1 ? "" : "s"}${done.length ? ` · ${done.length} closed` : ""}${scope}`;
   if (acts.length === 0 && done.length === 0) return head;
 
-  const lines = acts.slice(0, limit).map(row);
-  const hidden = acts.length - lines.length;
+  const recent = acts.slice(0, limit);
+  // The oldest open actions, minus whatever the recent head already shows. Read
+  // top to bottom the block is a timeline: newest, the hidden middle, oldest.
+  const stale = acts.length > recent.length
+    ? acts.slice(Math.max(recent.length, acts.length - STALE_ROWS))
+    : [];
+  const hidden = acts.length - recent.length - stale.length;
   // Closed first and uncapped: the whole point is that a retired action stops being
   // re-logged, and a reader who never reaches it will log it again. There are single
   // digits of these against hundreds of open ones.
   return [
     head,
     ...(done.length ? ["closed:", ...done.map(row), "open:"] : []),
-    ...lines,
+    ...recent.map(row),
     ...(hidden > 0 ? [`+${hidden} older`] : []),
+    ...(stale.length ? ["stale:", ...stale.map(row)] : []),
   ].join("\n");
 }
 
@@ -216,7 +236,8 @@ async function readStdin(): Promise<string> {
 
 const USAGE = `usage: journal-append.ts --journal <path> [mode]
        (no mode)                   append: an Entry as JSON on stdin, or raw markdown
-       --actions [--tool <name>]   the improvement backlog, newest first
+       --actions [--tool <name>]   the improvement backlog: newest first, then the
+                                   oldest still-open ones under 'stale:'
        --recent <name>             what prior wraps said about one tool
        --limit <n>                 cap rows (default 20 actions / 5 sections)`;
 

@@ -56,7 +56,9 @@ Then read the standing backlog once:
 bun run "<skill-base-dir>/../../lib/journal-append.ts" --journal ~/.claude/tooling-journal.md --actions
 ```
 
-Newest first, with the qualifier the original wrap attached, and any retired actions in a `closed:` block ahead of the open ones. An action carrying `(recurring, unmoved)` or `(10th repetition)` is the one to act on or explicitly retire — not to log an eleventh time.
+Three blocks. `closed:` first and uncapped, then the newest open actions, then `stale:` — the five OLDEST actions nobody has retired. An action carrying `(recurring, unmoved)` or `(10th repetition)` is the one to act on or explicitly retire, not to log an eleventh time.
+
+**The `stale:` block is the one with a job attached.** Those five are there because recency alone made this backlog write-only: at 20 rows against 336 actions an item left the view about four days after it was written and was never shown again, which is how 132 sessions produced 5 closes. They are not a duplication artefact — 336 rows were 276 distinct ideas. Answer each of the five: still open, already done, or never going to happen? "Never going to happen" is a perfectly good `closed` entry, and it is the only thing that makes the block advance — the same five reappear every session until one is retired.
 
 **Retiring is a write, not a decision you hold in your head.** Put it in the `closed` array of the tool's entry in step 4 and it stops coming back; leave it out and the next wrap re-reads it as open and logs an eleventh. This instruction existed for months with no mechanism behind it, and the result was 312 actions in which nothing was ever closed — one of them re-logged eight times, all eight sitting in the default view.
 

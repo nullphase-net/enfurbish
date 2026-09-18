@@ -99,10 +99,67 @@ test("reportActions leads with the count, the match rate and the drift", () => {
   expect(out[1]).toContain("(10th repetition)"); // newest first
 });
 
-test("reportActions caps rows and says how many it hid", () => {
-  const out = reportActions(parseSections(DRIFTED), undefined, 2).split("\n");
-  expect(out[0]).toBe("4 actions");
-  expect(out.at(-1)).toBe("+2 older");
+// --- the stale tail: a backlog you cannot see is one you cannot close -------
+// Recency alone made the journal write-only — an action left the 20-row view in
+// about four days and was never displayed again. These pin the arithmetic, both
+// directions: nothing hidden that is not counted, nothing counted that is shown.
+
+/** N actions, newest last on disk, so acts[] comes back newest-first. */
+const manyActions = (n: number) =>
+  parseSections(
+    Array.from({ length: n }, (_, i) =>
+      [
+        `## 2026-01-${String((i % 28) + 1).padStart(2, "0")}T00:00:00-05:00  •  s  •  ${i}`,
+        "",
+        `### tool-${i}  •  1 run  •  verdict: helped`,
+        `- Action: fix number ${i}.`,
+        "",
+      ].join("\n"),
+    ).join("\n"),
+  );
+
+test("reportActions caps rows, shows the oldest anyway, and counts only the hidden middle", () => {
+  const out = reportActions(manyActions(30), undefined, 20).split("\n");
+  expect(out[0]).toBe("30 actions");
+  expect(out.filter(l => l === "stale:")).toHaveLength(1);
+  // 20 newest + 5 oldest shown, so exactly 5 sit unseen in the middle.
+  expect(out).toContain("+5 older");
+  expect(out.at(-1)).toContain("fix number 0.");   // the very oldest is on screen
+  expect(out[1]).toContain("fix number 29.");      // ...and so is the newest
+});
+
+test("the stale block never repeats a row the recent head already showed", () => {
+  const out = reportActions(manyActions(30), undefined, 20);
+  const shown = out.split("\n").filter(l => /fix number \d+\./.test(l));
+  expect(new Set(shown).size).toBe(shown.length);
+  expect(shown).toHaveLength(25);
+});
+
+test("recent + stale + hidden always equals the total", () => {
+  for (const [n, limit] of [[30, 20], [4, 2], [26, 20], [25, 20], [1, 20]] as const) {
+    const out = reportActions(manyActions(n), undefined, limit).split("\n");
+    const shown = out.filter(l => /fix number \d+\./.test(l)).length;
+    const hiddenLine = out.find(l => /^\+\d+ older$/.test(l));
+    const hidden = hiddenLine ? Number.parseInt(hiddenLine.slice(1), 10) : 0;
+    expect(shown + hidden).toBe(n);
+  }
+});
+
+// The other direction. A short backlog is fully visible, so a stale block would
+// be duplicate rows under a heading that implies neglect — the "no lines that
+// say nothing happened" rule.
+test("no stale block, and no hidden count, when every action already fits", () => {
+  const out = reportActions(manyActions(20), undefined, 20);
+  expect(out).not.toContain("stale:");
+  expect(out).not.toContain("older");
+  expect(out.split("\n").filter(l => /fix number/.test(l))).toHaveLength(20);
+});
+
+test("a backlog just past the cap spills into stale rather than hiding anything", () => {
+  const out = reportActions(manyActions(22), undefined, 20).split("\n");
+  expect(out).toContain("stale:");
+  expect(out.some(l => /^\+\d+ older$/.test(l))).toBe(false);
+  expect(out.at(-1)).toContain("fix number 0.");
 });
 
 test("reportActions on no match states the zero rather than staying silent", () => {

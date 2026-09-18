@@ -108,7 +108,7 @@ bun run lib/journal-append.ts --journal $J --actions --tool continuity
 bun run lib/journal-append.ts --journal $J --recent scan.ts
 ```
 
-`--actions` is the improvement backlog, newest first, carrying the qualifier the original wrap attached (`(recurring, unmoved)`, `(10th repetition)`), with any retired actions in a `closed:` block ahead of the open ones — uncapped, because a reader who never reaches a retired action logs it again. `--recent` returns whole sections for one tool. Both match tool names loosely, which is the point: headings and action prefixes are free text a model composed, and they drift.
+`--actions` is the improvement backlog, carrying the qualifier the original wrap attached (`(recurring, unmoved)`, `(10th repetition)`). Retired actions come first in a `closed:` block — uncapped, because a reader who never reaches a retired action logs it again — then the newest open ones, then `stale:`, the five oldest nobody has retired. The tail is there because recency alone made the backlog write-only: at 20 rows against 336 actions an item left the view in about four days and was never displayed again, and an action nobody sees is one nobody can close. `--recent` returns whole sections for one tool. Both match tool names loosely, which is the point: headings and action prefixes are free text a model composed, and they drift.
 
 How much drift, measured against one real 130-wrap journal: `grep '^- Action:'` reached 143 of 241 action lines, and the 98 it missed skewed toward the long-running ones (`Action (recurring, unmoved)` ×17, `(10th repetition)` ×3). `grep '^### continuity'` reached 109 of 134 sections, across 35 distinct spellings of one plugin's name. Your journal will differ; the failure mode won't.
 
