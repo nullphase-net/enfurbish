@@ -30,7 +30,7 @@ if (import.meta.main) {
     const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || join(import.meta.dir, "..");
     const context = buildOutput(pluginRoot);
     if (context === null) {
-      debugLog("no ledger — emitting empty");
+      debugLog("no configured languages — emitting empty");
       process.stdout.write("{}\n");
     } else {
       debugLog(`injected ${context.length} chars`);

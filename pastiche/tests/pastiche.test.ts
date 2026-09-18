@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -372,4 +373,35 @@ describe("subject tags", () => {
     expect(ctx).toContain("- es: la red — network  [last surfaced 2026-02-02]");
     expect(ctx).not.toContain("la red — network  []");
   });
+});
+
+// --- local date ------------------------------------------------------------
+
+// `bun test` runs with the process timezone forced to UTC — getTimezoneOffset()
+// is 0 inside a test and 300 under `bun run` on this machine. An in-process
+// assertion therefore cannot tell a local implementation from a UTC one, and
+// would pass against either forever. These run in a child with a real zone.
+
+function todayUnder(tz: string, y: number, m: number, d: number, h: number): string {
+  const lib = join(import.meta.dir, "..", "lib", "pastiche.ts");
+  const r = spawnSync(
+    "bun",
+    ["-e", `import { today } from ${JSON.stringify(lib)};` +
+           `process.stdout.write(today(new Date(${y}, ${m}, ${d}, ${h}, 30)));`],
+    { encoding: "utf8", env: { ...process.env, TZ: tz } },
+  );
+  if (r.status !== 0) throw new Error(`child failed: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+test("today() uses the local calendar date west of UTC", () => {
+  // Local 2026-09-18 23:30 in Chicago is 2026-09-19T04:30Z — toISOString() would
+  // stamp tomorrow, which is the measured bug.
+  expect(todayUnder("America/Chicago", 2026, 8, 18, 23)).toBe("2026-09-18");
+});
+
+test("today() uses the local calendar date east of UTC", () => {
+  // Local 2026-09-18 00:30 in Berlin is 2026-09-17T22:30Z — the same bug in the
+  // other direction, which a single westward case would not catch.
+  expect(todayUnder("Europe/Berlin", 2026, 8, 18, 0)).toBe("2026-09-18");
 });

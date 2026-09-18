@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -317,8 +317,35 @@ export function sameTerm(text: string, code: string, body: string): string {
   return "";
 }
 
+/**
+ * The LOCAL calendar date, not the UTC one.
+ *
+ * `toISOString()` rolls over at UTC midnight, which is 19:00 CDT — so an evening
+ * session stamped every entry it wrote with tomorrow's date, and `seen:` drives
+ * rotation, so an 8pm term outranked a 9am term that was genuinely newer.
+ * Measured 2026-08-18 22:07 CDT and again 2026-09-08 23:00 CDT.
+ */
 export function today(now = new Date()): string {
-  return now.toISOString().slice(0, 10);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/**
+ * Write via temp file + rename, the same way `journal-append.ts` and
+ * `affirm.ts` do. The ledger has concurrent writers in practice — another
+ * session appended six entries to it mid-review on 2026-09-08 — and a bare
+ * `writeFileSync` can be observed truncated. This closes the truncation half;
+ * the lost-update window is narrowed, not eliminated.
+ */
+function writeLedger(path: string, text: string): void {
+  const tmp = `${path}.tmp-${process.pid}`;
+  try {
+    writeFileSync(tmp, text, "utf8");
+    renameSync(tmp, path);
+  } catch (e) {
+    try { unlinkSync(tmp); } catch { /* best effort */ }
+    throw e;
+  }
 }
 
 const USAGE = `usage: pastiche.ts [--due <n>]
@@ -369,7 +396,7 @@ export function main(
     if (before === after) {
       return out(`already ${arg} — ${hits.length} matched, nothing to change`), 0;
     }
-    writeFileSync(cfg.ledger, after);
+    writeLedger(cfg.ledger, after);
     const n = hits.length > 1 ? ` (${hits.length} lines)` : "";
     return out(`${verb} ${JSON.stringify(needle)} -> ${arg}${n}`), 0;
   };
@@ -437,7 +464,7 @@ export function main(
     }
     if (added.length) {
       mkdirSync(dirname(cfg.ledger), { recursive: true });
-      writeFileSync(cfg.ledger, text);
+      writeLedger(cfg.ledger, text);
     }
     for (const l of added) out(`+ ${l}`);
     for (const b of skipped) out(`exists: ${b}`);
