@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collect, commitsSince, formatHeader, generation, main, ownership, report, stamp, windowSince } from "../lib/handoffs";
+import { collect, commitsSince, formatHeader, generation, main, ownership, ownershipSince, report, stamp, windowSince } from "../lib/handoffs";
 import { spawnSync } from "node:child_process";
 import { gitInitClean } from "./helpers/git";
 
@@ -24,6 +24,62 @@ test("content changed after stamping reads as edited", () => {
 
 test("a file with no stamp reads as unstamped", () => {
   expect(ownership(BODY)).toBe("unstamped");
+});
+
+// --- edited, split on when -------------------------------------------------
+// Both directions, because a probe asserted one way cannot fail. `during` is
+// the case that was always handled; `prior` is the one that had no branch and
+// got handled as `during` by default.
+
+const EDITED = stamp(BODY) + "- [ ] someone added this\n";
+const START = "2026-09-18T12:00:00Z";
+const START_MS = Date.parse(START);
+
+test("edited during the session splits as edited:during", () => {
+  expect(ownershipSince(EDITED, START_MS + 60_000, START)).toBe("edited:during");
+});
+
+test("edited before the session splits as edited:prior", () => {
+  expect(ownershipSince(EDITED, START_MS - 60_000, START)).toBe("edited:prior");
+});
+
+test("mtime exactly at session_start counts as during", () => {
+  expect(ownershipSince(EDITED, START_MS, START)).toBe("edited:during");
+});
+
+test("the split leaves assistant alone — a stamp match needs no clock", () => {
+  expect(ownershipSince(stamp(BODY), START_MS - 60_000, START)).toBe("assistant");
+  expect(ownershipSince(stamp(BODY), START_MS + 60_000, START)).toBe("assistant");
+});
+
+test("unstamped splits on the same test, both directions", () => {
+  expect(ownershipSince(BODY, START_MS + 60_000, START)).toBe("unstamped:during");
+  expect(ownershipSince(BODY, START_MS - 60_000, START)).toBe("unstamped:prior");
+});
+
+test("an unparseable session_start returns the unsplit answer rather than guessing", () => {
+  expect(ownershipSince(EDITED, START_MS - 60_000, "not a date")).toBe("edited");
+  expect(ownershipSince(BODY, START_MS - 60_000, "not a date")).toBe("unstamped");
+});
+
+test("--check without a since argument still answers the old three", () => {
+  const dir = mkdtempSync(join(tmpdir(), "handoff-check-"));
+  const path = join(dir, "NEXT_SESSION.md");
+  writeFileSync(path, EDITED);
+  const out: string[] = [];
+  expect(main(["--check", path], Date.now(), s => void out.push(s))).toBe(0);
+  expect(out[0]).toBe("edited");
+});
+
+test("--check with a since argument reports edited:prior for a dead session's pointer", () => {
+  const dir = mkdtempSync(join(tmpdir(), "handoff-check-"));
+  const path = join(dir, "NEXT_SESSION.md");
+  writeFileSync(path, EDITED);
+  const old = new Date(START_MS - 3600_000);
+  utimesSync(path, old, old);
+  const out: string[] = [];
+  expect(main(["--check", path, START], Date.now(), s => void out.push(s))).toBe(0);
+  expect(out[0]).toBe("edited:prior");
 });
 
 test("the stamp does not depend on trailing whitespace", () => {

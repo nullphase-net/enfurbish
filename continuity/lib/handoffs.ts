@@ -130,6 +130,42 @@ export function ownership(text: string): Ownership {
   return found[1] === generation(text) ? "assistant" : "edited";
 }
 
+export type CheckResult =
+  | Ownership
+  | "edited:during" | "edited:prior"
+  | "unstamped:during" | "unstamped:prior";
+
+/**
+ * Split `edited` on WHEN the edit landed, because "edited" names a change and
+ * not an author, and the two authors it can mean want opposite handling.
+ *
+ * The same test applies to `unstamped`, which is why the split runs on both:
+ * "who wrote this" was being answered by hand from a timestamp the caller had
+ * already handed us, next to a path we already stat.
+ *
+ * mtime at or after `sessionStart` is a write this session could have made —
+ * the caller's own transcript decides between them, and the notes may be the
+ * user's. mtime before it is neither: a prior session that died before
+ * wrapping. That pointer is stale by exactly the work its session never got to
+ * log, and preserving it hands the next session a lead item nobody is coming
+ * back to finish — measured 2026-09-18, where preserving one would have staged
+ * a duplicate launch of a scarce, billable GPU instance.
+ *
+ * An unparseable `sessionStart` returns the unsplit answer. Guessing a side
+ * here picks one of two opposite handlings on no evidence.
+ */
+export function ownershipSince(
+  text: string,
+  mtimeMs: number,
+  sessionStart: string,
+): CheckResult {
+  const own = ownership(text);
+  if (own === "assistant") return own;
+  const start = Date.parse(sessionStart);
+  if (!Number.isFinite(start)) return own;
+  return `${own}:${mtimeMs >= start ? "during" : "prior"}`;
+}
+
 // --- reporting -------------------------------------------------------------
 
 const LAST_WRAPPED = /^\*\*Last wrapped:\*\*\s*(\S+)/m;
@@ -350,7 +386,9 @@ export function windowSince(root: string, path: string, limit = 25): string {
 
 const USAGE = `usage: handoffs.ts [--cwd <dir>]        list NEXT_SESSION.md files under the project root
        --stamp <path>              rewrite <path> with a current wrap-generation stamp
-       --check <path>              assistant | edited | unstamped
+       --check <path> [since]      assistant | edited | unstamped; with an ISO
+                                   <since> (the session_start), edited and unstamped
+                                   each split :during | :prior
        --header <slug> <sid8> [retro]
                                    print the canonical header block, timestamped now
        --since <path>              commits and files landed after <path>'s header`;
@@ -391,7 +429,10 @@ export function main(
     if (!path) return process.stderr.write(`${USAGE}\n`), 2;
     if (!existsSync(path)) return emit(`absent ${path}`), 0;
     const text = readFileSync(path, "utf8");
-    if (flag === "--check") return emit(ownership(text)), 0;
+    if (flag === "--check") {
+      const since = args[2];
+      return emit(since ? ownershipSince(text, statSync(path).mtimeMs, since) : ownership(text)), 0;
+    }
     const next = stamp(text);
     if (next !== text) writeFileSync(path, next);
     return emit(`stamped ${generation(text)} ${path}`), 0;

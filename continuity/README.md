@@ -25,6 +25,7 @@ The listing is a CLI you can run yourself:
 ```bash
 bun run lib/handoffs.ts --cwd "$(pwd)"          # every handoff, newest first
 bun run lib/handoffs.ts --check ./NEXT_SESSION.md   # assistant | edited | unstamped
+bun run lib/handoffs.ts --check ./NEXT_SESSION.md 2026-09-18T12:00:00Z  # ...:during | ...:prior
 bun run lib/handoffs.ts --since ./NEXT_SESSION.md   # what landed after its header
 ```
 

@@ -164,12 +164,19 @@ Empty stdin is a no-op — the script exits cleanly without touching the journal
 1. **Ask who last wrote it, then decide whether to preserve.**
 
    ```bash
-   bun run "<skill-base-dir>/../../lib/handoffs.ts" --check "$(pwd)/NEXT_SESSION.md"
+   bun run "<skill-base-dir>/../../lib/handoffs.ts" --check "$(pwd)/NEXT_SESSION.md" "<session_start>"
    ```
 
+   Pass `session_start` from step 1. `edited` and `unstamped` each name a change and not an author, and the two authors either can mean want opposite handling — so the CLI splits them on the file's mtime. Don't compare timestamps yourself; it has the path and the `session_start` already.
+
    - `assistant` — content still matches the stamp a wrap wrote. Nothing has touched it since. Proceed to the per-item merge. **`assistant` is not an all-clear on the content**: it says nobody edited the file, not that the file is still true. A pointer stamped `assistant` described a repo 9 commits in the past, and 3 of its 6 threads were dead. `--since` in step 2 is what answers that.
-   - `edited` — someone wrote to it after the last stamp. **Leave it alone unless your own transcript shows the edits were yours.** A mid-session reconcile that rewrote the file without re-stamping is byte-identical to a user edit, and the model doing that reconcile had no reason to have loaded this skill — so "edited" does not mean "theirs". Followed literally on 2026-09-14 this branch would have discarded an entire session's handoff work, none of it the user's. When the notes *are* theirs, don't clobber them; new next-steps you synthesized go into the retro's "Follow-ups staged" section.
-   - `unstamped` — written before this mechanism existed, or by hand. Fall back to the mtime test: mtime ≥ `session_start` ⇒ treat as user-edited and preserve.
+   - `edited:during` — written during this session. **Leave it alone unless your own transcript shows the edits were yours.** A mid-session reconcile that rewrote the file without re-stamping is byte-identical to a user edit, and the model doing that reconcile had no reason to have loaded this skill — so "edited" does not mean "theirs". Followed literally on 2026-09-14 this branch would have discarded an entire session's handoff work, none of it the user's. When the notes *are* theirs, don't clobber them; new next-steps you synthesized go into the retro's "Follow-ups staged" section.
+   - `edited:prior` — written before this session began, so by neither you nor this session's user. That is a prior session that died before wrapping. **Merge it as you would `assistant`.** Preserving it keeps a pointer nobody is coming back to finish, and it is stale by exactly the work that session never got to log — and unlike the `:during` cases, there are no notes here to put at risk. Measured 2026-09-18: preserving one would have sent the next session to launch a duplicate of a scarce, billable GPU instance.
+   - `unstamped:during` — no stamp, and it moved inside this session: written by hand, or by a writer that never stamps. Same ambiguity as `edited:during` and the same answer — **preserve unless your transcript shows the writes were yours.**
+   - `unstamped:prior` — no stamp and untouched since before this session began. Predates the mechanism. **Merge it.**
+   - Omitting `<session_start>` returns the unsplit `edited` / `unstamped`, as does a `session_start` the CLI cannot parse. Neither is a licence to guess a side: re-run it with a good timestamp.
+
+   Three of the five are unambiguous merges. Only the two `:during` cases need your transcript, because that is the one thing the CLI cannot see.
 
    The stamp exists because mtime was wrong in both directions. Every wrap writes the file *after* `session_start`, and assistant edits made through Bash (`cp`, a python heredoc) never enter `files_edited` either — so both the original heuristic and its first proposed fix classified the assistant's own work as the user's. A content hash the wrap stamps in is the only signal that survives whichever tool did the writing.
 
