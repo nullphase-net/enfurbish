@@ -51,12 +51,20 @@ ledger exists yet — with no file, the first terms a session introduces start i
 ## The ledger
 
 ```
-- km: ទឹក (teuk) — water | 2026-01-01 | ✓✓ | seen: 2026-03-14
+- km: ទឹក (teuk) — water | 2026-01-01 | ✓✓ | subj: family, food | seen: 2026-03-14
 ```
 
-Language code, term, gloss, introduce date, optional marks, last-surfaced date. Everything
-between the gloss and `seen:` is free text — pronunciation notes, where you heard it, who
-says it differently. The parser only needs the leading code and the trailing `seen:`.
+Language code, term, gloss, introduce date, optional marks, optional `subj:` tag,
+last-surfaced date. Everything between the gloss and `seen:` is free text — pronunciation
+notes, where you heard it, who says it differently. The parser only needs the leading code
+and the trailing `seen:`.
+
+`subj:` is what the term is *about*, and it is the one field the injected prompt asks the
+model to act on. A due item only fits a session whose work touches its subject; without the
+tag the model re-derives that subject from the gloss every session, and measured across
+seven sessions it kept re-deriving the same three — ប៉ា (dad), la tierra (electrical ground),
+la valuación — into technical work they could never fit. The tag doesn't filter anything;
+it hands over evidence the ledger already had. Untagged lines surface exactly as before.
 
 `seen:` is the whole rotation mechanism. Sessions restamp what they use, so used items move
 to the back and unused ones drift to the front. There are no intervals and no ease factors:
@@ -75,8 +83,9 @@ bun run lib/pastiche.ts                            # what's due now
 bun run lib/pastiche.ts --due 10                   # ...but ten of them
 bun run lib/pastiche.ts --seen "teuk"              # used it — restamp to today
 bun run lib/pastiche.ts --mark "teuk"              # used it right — ✓ and restamp
-bun run lib/pastiche.ts --add km "ទឹក (teuk) — water"
-bun run lib/pastiche.ts --add km -                 # ...or several, one per stdin line
+bun run lib/pastiche.ts --add km "ទឹក (teuk) — water" "family, food"
+bun run lib/pastiche.ts --add km - "rf, hardware"  # ...or several, one per stdin line
+bun run lib/pastiche.ts --tag "teuk" "family, food"   # tag something already there
 bun run lib/pastiche.ts --correct es "costa" "cuesta" "costar is o→ue, stressed forms only"
 bun run lib/pastiche.ts --path                     # resolved ledger path
 ```
@@ -99,6 +108,12 @@ $ printf 'la red — network\nel hilo — thread\n' | bun run lib/pastiche.ts --
 exists: la red — network
 (2 entries)
 ```
+
+Dedupe runs at two depths. An exact repeat reports `exists:`. A *reworded gloss of a term
+already in the ledger* reports `dupe:` and hands back the line that is already there, because
+the substring test cannot see it — measured on a real ledger, that miss produced 69 duplicated
+terms and 168 redundant lines, `el umbral` seventeen times, each one reported as new. When the
+term is already known the right move is `--mark` or `--tag`, not a tenth copy.
 
 Bare `--add <code>` with no body is still arg misuse (exit 2), not a blocking read on a tty —
 the `-` is required to ask for stdin.

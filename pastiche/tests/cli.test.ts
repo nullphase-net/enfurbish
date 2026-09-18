@@ -258,3 +258,106 @@ describe("--correct", () => {
     expect(readFileSync(c.ledger, "utf8").split("\n").filter(Boolean).length).toBe(3);
   });
 });
+
+describe("--tag", () => {
+  test("sets the subject on a matching entry and reports what it did", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    expect(main(["--tag", "la red", "networking"], c, s => void out.push(s))).toBe(0);
+    expect(readFileSync(c.ledger, "utf8"))
+      .toContain("- es: la red — network | 2026-02-01 | ✓ | subj: networking | seen: 2026-02-01");
+    expect(out[0]).toBe('tagged "la red" -> networking');
+  });
+
+  test("a missing subject is arg misuse, not a silent no-op", () => {
+    const c = fixture(SEED);
+    expect(main(["--tag", "la red"], c, () => {})).toBe(2);
+    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+  });
+
+  test("no match exits 0 and says so, leaving the ledger byte-identical", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    expect(main(["--tag", "nonesuch", "rf"], c, s => void out.push(s))).toBe(0);
+    expect(out[0]).toContain("no match");
+    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+  });
+
+  test("re-tagging to the same subject reports nothing-to-change rather than a write", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    main(["--tag", "la red", "networking"], c, () => {});
+    expect(main(["--tag", "la red", "networking"], c, s => void out.push(s))).toBe(0);
+    expect(out[0]).toContain("nothing to change");
+  });
+});
+
+describe("--add with a subject", () => {
+  test("a trailing subject lands on the new entry", () => {
+    const c = fixture(SEED);
+    expect(main(["--add", "es", "la tierra — ground", "rf, hardware"], c, () => {})).toBe(0);
+    expect(readFileSync(c.ledger, "utf8"))
+      .toContain(`- es: la tierra — ground | ${NOW} | subj: rf, hardware | seen: ${NOW}`);
+  });
+
+  test("one subject applies to a whole stdin batch", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    expect(main(["--add", "es", "-", "gpu"], c, s => void out.push(s),
+      () => "el consumo — power draw\nel calor — heat\n")).toBe(0);
+    const text = readFileSync(c.ledger, "utf8");
+    expect(text).toContain(`- es: el consumo — power draw | ${NOW} | subj: gpu | seen: ${NOW}`);
+    expect(text).toContain(`- es: el calor — heat | ${NOW} | subj: gpu | seen: ${NOW}`);
+  });
+
+  test("omitting the subject still writes the old shape", () => {
+    const c = fixture(SEED);
+    expect(main(["--add", "es", "el hilo — thread"], c, () => {})).toBe(0);
+    expect(readFileSync(c.ledger, "utf8"))
+      .toContain(`- es: el hilo — thread | ${NOW} | seen: ${NOW}`);
+  });
+});
+
+describe("--add duplicate detection", () => {
+  test("a reworded gloss of an existing term is reported, not minted as new", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    expect(main(["--add", "es", "la red — the network, a mesh of hosts"], c, s => void out.push(s))).toBe(0);
+    expect(out.join("\n")).toContain("dupe: la red");
+    expect(out.join("\n")).toContain("have: es: la red — network");
+    expect(out.join("\n")).not.toContain("+ - es: la red — the network");
+    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+  });
+
+  test("an exact repeat still reports exists:, which is the other miss", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    expect(main(["--add", "es", "la red — network"], c, s => void out.push(s))).toBe(0);
+    expect(out.join("\n")).toContain("exists:");
+  });
+
+  test("a genuinely new term is still added", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    expect(main(["--add", "es", "el hilo — thread"], c, s => void out.push(s))).toBe(0);
+    expect(out.join("\n")).toContain("+ - es: el hilo — thread");
+    expect(readFileSync(c.ledger, "utf8")).toContain("el hilo — thread");
+  });
+
+  test("the same head in another language is a different term and is added", () => {
+    const c = fixture("- es: la red — network | 2026-02-01 | seen: 2026-02-01\n");
+    expect(main(["--add", "km", "la red — something else entirely"], c, () => {})).toBe(0);
+    expect(readFileSync(c.ledger, "utf8")).toContain("- km: la red —");
+  });
+
+  test("a dupe mid-batch does not stop the rest of the batch landing", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    expect(main(["--add", "es", "-"], c, s => void out.push(s),
+      () => "la red — a network of hosts\nel hilo — thread\n")).toBe(0);
+    const joined = out.join("\n");
+    expect(joined).toContain("dupe: la red");
+    expect(joined).toContain("+ - es: el hilo — thread");
+    expect(readFileSync(c.ledger, "utf8")).toContain("el hilo — thread");
+  });
+});

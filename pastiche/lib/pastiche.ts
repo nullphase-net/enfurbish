@@ -19,6 +19,12 @@ export type Entry = {
   term: string;
   introduced: string;
   seen: string;
+  /**
+   * What this term is ABOUT — `rf, hardware`, `family`, `math`. Empty when the
+   * line carries no tag, which is most of the ledger and is fine: an untagged
+   * item surfaces exactly as it always did.
+   */
+  subject: string;
 };
 
 const DEFAULT_DIR = join(homedir(), ".claude", "pastiche");
@@ -52,11 +58,17 @@ export function loadConfig(dir = pasticheDir()): Config {
 const CODE = /^- ([a-z]{2}): /;
 const DATE = /(\d{4}-\d{2}-\d{2})/;
 const SEEN = /seen: (\d{4}-\d{2}-\d{2})/;
+// Lazy + lookahead so the capture stops before the space that separates it
+// from the next ` | ` field. A greedy `[^|]+` swallows that space, and a
+// re-tag then writes `subj: x| seen:` — the separator silently degrades.
+const SUBJ = /subj: ([^|]+?)(?=\s*\||\s*$)/;
+/** A `key: value` field, as opposed to the free-text marks field. */
+const NAMED = /^\w+:\s/;
 
 /**
  * Parse ledger lines of the shape:
- *   `- km: ទឹក (teuk) — water | 2026-08-05 | ✓✓ | seen: 2026-08-12`
- * The marks field is optional. A line with no `seen:` falls back to its
+ *   `- km: ទឹក (teuk) — water | 2026-08-05 | ✓✓ | subj: family | seen: 2026-08-12`
+ * The marks and `subj:` fields are both optional. A line with no `seen:` falls back to its
  * introduce date, so a hand-written line is never invisible to the sort.
  */
 export function parseLedger(text: string): Entry[] {
@@ -72,6 +84,7 @@ export function parseLedger(text: string): Entry[] {
       term: parts[0].slice(code[0].length).trim(),
       introduced,
       seen: SEEN.exec(line)?.[1] ?? introduced,
+      subject: SUBJ.exec(line)?.[1].trim() ?? "",
     });
   }
   return out;
@@ -115,9 +128,33 @@ export function mark(text: string, needle: string, date: string): string {
       if (!SEEN.test(l)) return `${l} | ✓ | seen: ${date}`;
       const parts = l.split(" | ");
       const head = parts.slice(0, -1);
-      if (head.length >= 3) head[2] = `✓${head[2]}`;
-      else head.push("✓");
+      // The marks slot is the first field after the introduce date that is not
+      // a named `key: value` one, so a `subj:` tag never collects a ✓.
+      let i = 2;
+      while (i < head.length && NAMED.test(head[i])) i++;
+      if (i < head.length) head[i] = `✓${head[i]}`;
+      else head.splice(2, 0, "✓");
       return [...head, `seen: ${date}`].join(" | ");
+    })
+    .join("\n");
+}
+
+/**
+ * Set (or replace) the `subj:` tag on every line containing `needle`.
+ *
+ * It exists because the tag has to reach the ~20 items already in rotation, and
+ * those lines were written before the field did. A field with no writer for the
+ * lines that predate it is a field that stays empty forever.
+ */
+export function tag(text: string, needle: string, subject: string): string {
+  return text
+    .split("\n")
+    .map(l => {
+      if (!CODE.test(l) || !l.includes(needle)) return l;
+      if (SUBJ.test(l)) return l.replace(SUBJ, `subj: ${subject}`);
+      if (!SEEN.test(l)) return `${l} | subj: ${subject}`;
+      const parts = l.split(" | ");
+      return [...parts.slice(0, -1), `subj: ${subject}`, parts.at(-1)].join(" | ");
     })
     .join("\n");
 }
@@ -135,11 +172,21 @@ export function matchingLines(text: string, needle: string): string[] {
 /**
  * Render a ledger line. The only place the on-disk format is written.
  * `marks` seeds the optional third field — `✗` for a correction, so a later
- * `mark()` reads `✓✗`: got it wrong once, right since.
+ * `mark()` reads `✓✗`: got it wrong once, right since. `subject` seeds `subj:`,
+ * which always follows the marks so `mark()` can find the marks by position.
  */
-export function formatEntry(code: string, body: string, date: string, marks?: string): string {
-  const stamped = marks ? `${date} | ${marks}` : date;
-  return `- ${code}: ${body} | ${stamped} | seen: ${date}`;
+export function formatEntry(
+  code: string,
+  body: string,
+  date: string,
+  marks?: string,
+  subject?: string,
+): string {
+  const fields = [body, date];
+  if (marks) fields.push(marks);
+  if (subject) fields.push(`subj: ${subject}`);
+  fields.push(`seen: ${date}`);
+  return `- ${code}: ${fields.join(" | ")}`;
 }
 
 /**
@@ -166,7 +213,9 @@ export function buildContext(opts: {
     ? cfg.languages.map(l => `- ${l.name} (${l.code}) — ${l.domains}`).join("\n")
     : "- (none configured — see the plugin README)";
   const dueList = due.length
-    ? due.map(e => `  - ${e.code}: ${e.term}  [last surfaced ${e.seen}]`).join("\n")
+    ? due.map(e =>
+        `  - ${e.code}: ${e.term}${e.subject ? `  [${e.subject}]` : ""}  [last surfaced ${e.seen}]`,
+      ).join("\n")
     : "  (nothing due yet — the ledger is empty or not created; the first terms you\n" +
       "   introduce start it)";
   const freshRule = cfg.fresh > 0
@@ -190,6 +239,12 @@ right now. Re-teach without ceremony; forgetting is expected, not a failure.
 A due item the session gives no opening is a scheduling mismatch, not a retention
 failure. Leave it due rather than forcing it; it rotates back. The test is the one
 the new-term budget already uses: does this session's work touch the term's subject.
+
+The bracket after a due term IS that subject — [rf, hardware], [family]. Read it
+and answer the test; don't re-derive the subject from the gloss when the line already
+says it. An item with no bracket is untagged, not subject-free: derive it as before,
+and tag it with --tag once you know. Tag what you add, too — an untagged addition is
+the next session re-deriving what this one already knew.
 
 A term fits only where its gloss fits. A due word that looks like the English word
 your sentence needs but glosses differently is a false friend: the shape is the
@@ -223,8 +278,9 @@ Write the ledger with these, never by editing the file — they own the format:
   P=${join(pluginRoot, "lib", "pastiche.ts")}
   bun run $P --seen "<term>"                 # used it — rotates it out
   bun run $P --mark "<term>"                 # they used it right — ✓ and rotate
-  bun run $P --add <code> "<term> — <gloss>" # new or primed item
-  bun run $P --add <code> -                  # ...or several, one per stdin line
+  bun run $P --add <code> "<term> — <gloss>" [subject]   # new or primed item
+  bun run $P --add <code> - [subject]        # ...or several, one per stdin line
+  bun run $P --tag "<term>" "<subject>"      # tag a term already in the ledger
   bun run $P --correct <code> "<wrong>" "<right>" "<rule>"   # they corrected you`;
 }
 
@@ -243,6 +299,24 @@ export function loadNotes(pluginRoot: string, cfg: Config): string {
   return chunks.length ? `\n${chunks.join("\n\n")}\n` : "";
 }
 
+/** The term itself, without its gloss — `la red` out of `la red — network`. */
+export function headOf(body: string): string {
+  return body.split(" — ")[0].trim();
+}
+
+/**
+ * The first ledger line for the same language and the same head term, or "".
+ * This is the check `text.includes(body)` cannot make: nine sessions wrote nine
+ * glosses of `el registro` and each one looked new.
+ */
+export function sameTerm(text: string, code: string, body: string): string {
+  const head = headOf(body);
+  for (const e of parseLedger(text)) {
+    if (e.code === code && headOf(e.term) === head) return e.line;
+  }
+  return "";
+}
+
 export function today(now = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
@@ -250,8 +324,10 @@ export function today(now = new Date()): string {
 const USAGE = `usage: pastiche.ts [--due <n>]
        --seen "<term>"              restamp: used it, rotate it out
        --mark "<term>"              ✓ and restamp: they used it correctly
-       --add <code> "<term> — <gloss>"
-       --add <code> -               read one "<term> — <gloss>" per line from stdin
+       --add <code> "<term> — <gloss>" [subject]
+       --add <code> - [subject]     read one "<term> — <gloss>" per line from stdin;
+                                    one subject applies to the whole batch
+       --tag "<term>" "<subject>"   set what an existing term is about
        --correct <code> "<wrong>" "<right>" "<rule>"
        --path`;
 
@@ -270,7 +346,7 @@ export function main(
   const read = () => (existsSync(cfg.ledger) ? readFileSync(cfg.ledger, "utf8") : "");
   const usage = (): number => (process.stderr.write(`${USAGE}\n`), 2);
 
-  const edit = (fn: typeof restamp, verb: string): number => {
+  const edit = (fn: typeof restamp, verb: string, arg = today()): number => {
     const needle = args[1];
     if (!needle) return usage();
     const before = read();
@@ -289,18 +365,19 @@ export function main(
       return 0;
     }
 
-    const after = fn(before, needle, today());
+    const after = fn(before, needle, arg);
     if (before === after) {
-      return out(`already ${today()} — ${hits.length} matched, nothing to change`), 0;
+      return out(`already ${arg} — ${hits.length} matched, nothing to change`), 0;
     }
     writeFileSync(cfg.ledger, after);
     const n = hits.length > 1 ? ` (${hits.length} lines)` : "";
-    return out(`${verb} ${JSON.stringify(needle)} -> ${today()}${n}`), 0;
+    return out(`${verb} ${JSON.stringify(needle)} -> ${arg}${n}`), 0;
   };
 
   if (flag === "--path") return out(cfg.ledger), 0;
   if (flag === "--seen") return edit(restamp, "restamped");
   if (flag === "--mark") return edit(mark, "✓");
+  if (flag === "--tag") return args[2] ? edit(tag, "tagged", args[2]) : usage();
 
   if (flag === "--add" || flag === "--correct") {
     const code = args[1];
@@ -312,6 +389,7 @@ export function main(
 
     let bodies: string[];
     let marks: string | undefined;
+    let subject: string | undefined;
     if (flag === "--correct") {
       // Three args rather than one composed string: if the session assembled
       // "<wrong> → <right> — <rule>" itself, the format would live in the prompt.
@@ -330,6 +408,9 @@ export function main(
       bodies = body === "-"
         ? stdin().split("\n").map(s => s.trim()).filter(Boolean)
         : [body];
+      // One subject for the whole batch: a session's additions are minted from
+      // one body of work, so they share its subject by construction.
+      subject = args[3];
     }
     if (!bodies.length) return out("stdin empty — nothing to add"), 0;
 
@@ -337,12 +418,20 @@ export function main(
     let text = before;
     const added: string[] = [];
     const skipped: string[] = [];
+    const dupes: string[] = [];
     for (const b of bodies) {
-      // ponytail: exact-substring dedupe. A reworded gloss slips through; --mark
-      // is the fix when it does. Fuzzy matching if duplicates actually pile up.
-      // Matching against the accumulator, not `before`, also dedupes within a batch.
+      // Exact-substring dedupe. Matching against the accumulator, not `before`,
+      // also dedupes within a batch.
       if (text.includes(b)) { skipped.push(b); continue; }
-      const line = formatEntry(code, b, today(), marks);
+      // ...and the same term under a reworded gloss, which the substring test
+      // cannot see. It piled up exactly as the old comment here guessed it might:
+      // 69 terms duplicated, 168 redundant lines, `el umbral` seventeen times,
+      // every one of them reported as a new entry. Compare the head — the part
+      // before the gloss — and hand back what is already there, so the session
+      // can --mark or --tag it instead of minting a tenth copy.
+      const hit = sameTerm(text, code, b);
+      if (hit) { dupes.push(`${headOf(b)}\n  have: ${hit.slice(2, 96)}`); continue; }
+      const line = formatEntry(code, b, today(), marks, subject);
       text = text && !text.endsWith("\n") ? `${text}\n${line}\n` : `${text}${line}\n`;
       added.push(line);
     }
@@ -352,6 +441,7 @@ export function main(
     }
     for (const l of added) out(`+ ${l}`);
     for (const b of skipped) out(`exists: ${b}`);
+    for (const d of dupes) out(`dupe: ${d}`);
     if (added.length) out(`(${parseLedger(before).length + added.length} entries)`);
     return 0;
   }
@@ -364,7 +454,9 @@ export function main(
   const n = flag === "--due" && args[1] ? Number.parseInt(args[1], 10) : cfg.due;
   if (!Number.isFinite(n)) return usage();
   const entries = parseLedger(text);
-  for (const e of stalest(entries, n)) out(`${e.seen}  ${e.code}: ${e.term}`);
+  for (const e of stalest(entries, n)) {
+    out(`${e.seen}  ${e.code}: ${e.term}${e.subject ? `  [${e.subject}]` : ""}`);
+  }
   const hidden = entries.length - Math.min(n, entries.length);
   if (hidden > 0) out(`+${hidden} fresher`);
   return 0;

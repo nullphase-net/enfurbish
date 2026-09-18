@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildContext, formatCorrection, formatEntry, loadConfig, loadNotes, mark, parseLedger,
-  restamp, stalest, today,
+  restamp, stalest, tag, today,
 } from "../lib/pastiche";
 
 const LEDGER = `# Ledger
@@ -292,5 +292,84 @@ describe("formatCorrection", () => {
   test("keeps the wrong form — it is what predicts the next mistake", () => {
     expect(formatCorrection("costa", "cuesta", "costar is o→ue, stressed forms only"))
       .toBe("costa → cuesta — costar is o→ue, stressed forms only");
+  });
+});
+
+// --- subject tags ----------------------------------------------------------
+// The tag is evidence for the one test the prompt asks the model to run. It has
+// to survive every other writer, and the marks field is the one it can collide
+// with, so the mark x subj matrix is enumerated rather than sampled.
+
+describe("subject tags", () => {
+  test("parseLedger reads subj:, and an untagged line reads empty not undefined", () => {
+    const e = parseLedger(
+      "- es: la tierra — ground | 2026-02-01 | subj: rf, hardware | seen: 2026-02-01\n" +
+      "- es: la red — network | 2026-02-01 | seen: 2026-02-01\n",
+    );
+    expect(e[0].subject).toBe("rf, hardware");
+    expect(e[1].subject).toBe("");
+  });
+
+  test("formatEntry places subj after marks, and omits it when absent", () => {
+    expect(formatEntry("es", "la tierra — ground", "2026-02-01", "✗", "rf")).toBe(
+      "- es: la tierra — ground | 2026-02-01 | ✗ | subj: rf | seen: 2026-02-01",
+    );
+    expect(formatEntry("es", "la red — network", "2026-02-01")).toBe(
+      "- es: la red — network | 2026-02-01 | seen: 2026-02-01",
+    );
+    expect(formatEntry("es", "la red — network", "2026-02-01", undefined, "net")).toBe(
+      "- es: la red — network | 2026-02-01 | subj: net | seen: 2026-02-01",
+    );
+  });
+
+  test("mark never lands its ✓ on the subj field — all four shapes", () => {
+    const at = (l: string) => parseLedger(mark(l, "x —", "2026-05-05"))[0];
+    // no marks, no subj
+    expect(at("- es: x — y | 2026-01-01 | seen: 2026-01-01").line)
+      .toBe("- es: x — y | 2026-01-01 | ✓ | seen: 2026-05-05");
+    // marks, no subj
+    expect(at("- es: x — y | 2026-01-01 | ✓ | seen: 2026-01-01").line)
+      .toBe("- es: x — y | 2026-01-01 | ✓✓ | seen: 2026-05-05");
+    // subj, no marks — the ✓ must be inserted before it, not onto it
+    const c = at("- es: x — y | 2026-01-01 | subj: rf | seen: 2026-01-01");
+    expect(c.line).toBe("- es: x — y | 2026-01-01 | ✓ | subj: rf | seen: 2026-05-05");
+    expect(c.subject).toBe("rf");
+    // marks and subj
+    const d = at("- es: x — y | 2026-01-01 | ✗ | subj: rf | seen: 2026-01-01");
+    expect(d.line).toBe("- es: x — y | 2026-01-01 | ✓✗ | subj: rf | seen: 2026-05-05");
+    expect(d.subject).toBe("rf");
+  });
+
+  test("restamp leaves the tag alone", () => {
+    const l = "- es: x — y | 2026-01-01 | subj: rf | seen: 2026-01-01";
+    expect(parseLedger(restamp(l, "x —", "2026-05-05"))[0].subject).toBe("rf");
+  });
+
+  test("tag sets, replaces, and leaves non-matching lines untouched", () => {
+    const text =
+      "- es: la tierra — ground | 2026-02-01 | seen: 2026-02-01\n" +
+      "- es: la red — network | 2026-02-01 | seen: 2026-02-01\n";
+    const once = tag(text, "la tierra", "rf, hardware");
+    expect(parseLedger(once)[0].subject).toBe("rf, hardware");
+    expect(parseLedger(once)[1].subject).toBe("");
+    expect(parseLedger(tag(once, "la tierra", "electrical"))[0].subject).toBe("electrical");
+  });
+
+  test("tag appends to a line that has no seen: field at all", () => {
+    const e = parseLedger(tag("- es: el puerto — port | 2026-02-02", "el puerto", "net"))[0];
+    expect(e.subject).toBe("net");
+    expect(e.seen).toBe("2026-02-02");
+  });
+
+  test("buildContext brackets a tagged due item and brackets nothing for an untagged one", () => {
+    const cfg = { ledger: "/tmp/l.md", languages: [{ code: "es", name: "Spanish", domains: "tech" }], due: 5, fresh: 2 };
+    const due = parseLedger(
+      "- es: la tierra — ground | 2026-02-01 | subj: rf, hardware | seen: 2026-02-01\n" +
+      "- es: la red — network | 2026-02-01 | seen: 2026-02-02\n",
+    );
+    const ctx = buildContext({ cfg, due, notes: "", pluginRoot: "/p" });
+    expect(ctx).toContain("- es: la tierra — ground  [rf, hardware]  [last surfaced 2026-02-01]");
+    expect(ctx).toContain("- es: la red — network  [last surfaced 2026-02-02]");
+    expect(ctx).not.toContain("la red — network  []");
   });
 });
