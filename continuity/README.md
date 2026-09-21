@@ -157,6 +157,8 @@ One sentence on the most important thing to pick up.
 
 The header block is rendered by `handoffs.ts --header`, not typed — the same file parses `**Last wrapped:**` back out, so one function owns both ends. The timestamp isn't an argument either: the command stamps the clock, because a wrap that composed one from memory wrote UTC clock-time carrying a CDT offset and every `--since` window derived from it was five hours short, silently. The body beneath it is prose the wrap composes; nothing parses it.
 
+A project that tracks its open items in another tool says so in the file, in a section standing where `## Open threads` would be, naming the tool and the commands that read it. `/wrap` then records resolutions and new items there instead of copying the list into the file, and `/next` reads the list from there. The file keeps its prose sections. Nothing in the plugin names the tool — the file does — so the same skills work in a project with no such tool at all.
+
 The trailing `wrap-generation` line is a hash of the file's own content. `/wrap` writes it, and the next wrap compares it back: matching means nothing has touched the file since, so the per-item merge may proceed; not matching means someone hand-edited it and their notes must be preserved. It replaced an mtime test that misclassified the assistant's own writes as the user's.
 
 Scoped per cwd by design. A multi-package repo (`frontend/`, `api/`) can hold independent continuity threads; the SessionStart hook walks up to the project root and lists any siblings it finds, so nothing is forgotten.
