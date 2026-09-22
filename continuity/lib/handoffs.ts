@@ -130,10 +130,12 @@ export function ownership(text: string): Ownership {
   return found[1] === generation(text) ? "assistant" : "edited";
 }
 
-export type CheckResult =
-  | Ownership
-  | "edited:during" | "edited:prior"
-  | "unstamped:during" | "unstamped:prior";
+/** Every `--check` verdict. The array is the type's source, so a test can walk it. */
+export const CHECK_RESULTS = [
+  "assistant", "edited", "unstamped",
+  "edited:during", "edited:prior", "unstamped:during", "unstamped:prior",
+] as const;
+export type CheckResult = (typeof CHECK_RESULTS)[number];
 
 /**
  * Split `edited` on WHEN the edit landed, because "edited" names a change and
@@ -164,6 +166,34 @@ export function ownershipSince(
   const start = Date.parse(sessionStart);
   if (!Number.isFinite(start)) return own;
   return `${own}:${mtimeMs >= start ? "during" : "prior"}`;
+}
+
+/**
+ * What to do with each `--check` verdict, printed beneath it. The verdict is the
+ * fact; this is the handling, and it lives here rather than in the skill because
+ * the skill loads all seven states on every wrap and needs exactly one. Only the
+ * two `:during` states need the caller's transcript, the one thing this cannot see.
+ */
+const GUIDANCE: Record<CheckResult, string> = {
+  "assistant":
+    "untouched since the last wrap: merge per item. Not an all-clear on content; --since says what already moved.",
+  "edited:prior":
+    "moved before this session began, so by neither you nor this session's user: a prior session died before wrapping. Merge it as you would assistant.",
+  "unstamped:prior":
+    "no stamp, untouched since before this session began. Predates the mechanism: merge it as you would assistant.",
+  "edited:during":
+    "moved inside this session. Preserve it unless your own transcript shows the writes were yours; a mid-session reconcile that never re-stamped looks exactly like a user edit.",
+  "unstamped:during":
+    "no stamp, moved inside this session: written by hand or by a writer that never stamps. Preserve it unless your own transcript shows the writes were yours.",
+  "edited":
+    "moved since the last wrap; when is unknown. Re-run with a parseable session_start to split during/prior rather than guess a side. No session_start at all (scan degraded) leaves nothing to re-run with: preserve.",
+  "unstamped":
+    "no stamp; when it moved is unknown. Re-run with a parseable session_start to split during/prior rather than guess a side. No session_start at all (scan degraded) leaves nothing to re-run with: preserve.",
+};
+
+/** The `--check` output: verdict alone on line one, its handling on line two. */
+export function checkReport(result: CheckResult): string {
+  return `${result}\n  ${GUIDANCE[result]}`;
 }
 
 // --- reporting -------------------------------------------------------------
@@ -386,9 +416,10 @@ export function windowSince(root: string, path: string, limit = 25): string {
 
 const USAGE = `usage: handoffs.ts [--cwd <dir>]        list NEXT_SESSION.md files under the project root
        --stamp <path>              rewrite <path> with a current wrap-generation stamp
-       --check <path> [since]      assistant | edited | unstamped; with an ISO
-                                   <since> (the session_start), edited and unstamped
-                                   each split :during | :prior
+       --check <path> [since]      assistant | edited | unstamped, with what to do
+                                   about it on the next line; with an ISO <since>
+                                   (the session_start), edited and unstamped each
+                                   split :during | :prior
        --header <slug> <sid8> [retro]
                                    print the canonical header block, timestamped now
        --since <path>              commits and files landed after <path>'s header`;
@@ -431,7 +462,7 @@ export function main(
     const text = readFileSync(path, "utf8");
     if (flag === "--check") {
       const since = args[2];
-      return emit(since ? ownershipSince(text, statSync(path).mtimeMs, since) : ownership(text)), 0;
+      return emit(checkReport(since ? ownershipSince(text, statSync(path).mtimeMs, since) : ownership(text))), 0;
     }
     const next = stamp(text);
     if (next !== text) writeFileSync(path, next);

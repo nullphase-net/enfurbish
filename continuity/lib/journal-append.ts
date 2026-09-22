@@ -179,6 +179,12 @@ function row(a: Action): string {
  */
 const STALE_ROWS = 5;
 
+// The block with a job attached. It sits under the rows it is about, and only when
+// there are rows: an instruction the skill carried on every wrap did nothing for
+// months, because retiring an action had no write behind it.
+const STALE_GUIDANCE =
+  "  answer each: still open / already done / never going to happen. Retire it through the closed array of this wrap's entry, or it comes back next session.";
+
 export function reportActions(secs: Section[], tool: string | undefined, limit: number): string {
   const hit = matching(secs, tool);
   const acts = findActions(hit).reverse();
@@ -202,7 +208,7 @@ export function reportActions(secs: Section[], tool: string | undefined, limit: 
     ...(done.length ? ["closed:", ...done.map(row), "open:"] : []),
     ...recent.map(row),
     ...(hidden > 0 ? [`+${hidden} older`] : []),
-    ...(stale.length ? ["stale:", ...stale.map(row)] : []),
+    ...(stale.length ? ["stale:", STALE_GUIDANCE, ...stale.map(row)] : []),
   ].join("\n");
 }
 
@@ -236,8 +242,9 @@ async function readStdin(): Promise<string> {
 
 const USAGE = `usage: journal-append.ts --journal <path> [mode]
        (no mode)                   append: an Entry as JSON on stdin, or raw markdown
-       --actions [--tool <name>]   the improvement backlog: newest first, then the
-                                   oldest still-open ones under 'stale:'
+       --actions [--tool <name>]   the improvement backlog: closed first, newest
+                                   open next, oldest still-open under 'stale:' with
+                                   what to do about them
        --recent <name>             what prior wraps said about one tool
        --limit <n>                 cap rows (default 20 actions / 5 sections)`;
 

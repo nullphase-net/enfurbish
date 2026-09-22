@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collect, commitsSince, formatHeader, generation, main, ownership, ownershipSince, report, stamp, windowSince } from "../lib/handoffs";
+import { CHECK_RESULTS, checkReport, collect, commitsSince, formatHeader, generation, main, ownership, ownershipSince, report, stamp, windowSince } from "../lib/handoffs";
 import { spawnSync } from "node:child_process";
 import { gitInitClean } from "./helpers/git";
 
@@ -68,7 +68,7 @@ test("--check without a since argument still answers the old three", () => {
   writeFileSync(path, EDITED);
   const out: string[] = [];
   expect(main(["--check", path], Date.now(), s => void out.push(s))).toBe(0);
-  expect(out[0]).toBe("edited");
+  expect(out[0].split("\n")[0]).toBe("edited");
 });
 
 test("--check with a since argument reports edited:prior for a dead session's pointer", () => {
@@ -79,7 +79,7 @@ test("--check with a since argument reports edited:prior for a dead session's po
   utimesSync(path, old, old);
   const out: string[] = [];
   expect(main(["--check", path, START], Date.now(), s => void out.push(s))).toBe(0);
-  expect(out[0]).toBe("edited:prior");
+  expect(out[0].split("\n")[0]).toBe("edited:prior");
 });
 
 test("the stamp does not depend on trailing whitespace", () => {
@@ -208,9 +208,9 @@ test("--stamp then --check round-trips through the filesystem", () => {
   expect(main(["--check", path], Date.now(), s => void out.push(s))).toBe(0);
   expect(main(["--stamp", path], Date.now(), s => void out.push(s))).toBe(0);
   expect(main(["--check", path], Date.now(), s => void out.push(s))).toBe(0);
-  expect(out[0]).toBe("unstamped");
+  expect(out[0].split("\n")[0]).toBe("unstamped");
   expect(out[1]).toStartWith("stamped ");
-  expect(out[2]).toBe("assistant");
+  expect(out[2].split("\n")[0]).toBe("assistant");
 });
 
 test("--check on a missing file exits 0 and says absent", () => {
@@ -473,4 +473,50 @@ test("windowSince tells a commitless repo apart from no repo at all", () => {
   expect(out).toContain("no commits yet");
   expect(out).toContain("window unknown");
   expect(out).not.toContain("not a git repo");
+});
+
+// --- --check guidance ------------------------------------------------------
+// The verdict token stays alone on line one. Line two says what to do with it,
+// so the skill carries one sentence instead of a table of seven states that the
+// model loads on every wrap and needs exactly one of. One case per state: a
+// fixture that models one shape proves that shape and passes forever.
+
+test("checkReport puts the verdict alone on line one and guidance on line two, for every state", () => {
+  expect(CHECK_RESULTS.length).toBe(7);   // three verdicts, two of them split two ways
+  for (const s of CHECK_RESULTS) {
+    const lines = checkReport(s).split("\n");
+    expect(lines[0]).toBe(s);
+    expect(lines.length).toBe(2);
+    expect(lines[1]).toStartWith("  ");
+    expect(lines[1].trim()).not.toBe("");
+    expect(lines[1]).not.toContain("undefined");   // a state with no GUIDANCE entry renders as this
+  }
+});
+
+test("guidance pivots on state: prior and assistant merge, during preserves and names the transcript, unsplit re-runs then falls back to preserve", () => {
+  for (const s of ["assistant", "edited:prior", "unstamped:prior"] as const) {
+    expect(checkReport(s)).toMatch(/\bmerge\b/i);
+    expect(checkReport(s)).not.toMatch(/preserve/i);
+  }
+  for (const s of ["edited:during", "unstamped:during"] as const) {
+    expect(checkReport(s)).toMatch(/preserve/i);
+    expect(checkReport(s)).toMatch(/transcript/);
+    expect(checkReport(s)).not.toMatch(/\bmerge\b/i);
+  }
+  for (const s of ["edited", "unstamped"] as const) {
+    expect(checkReport(s)).toMatch(/re-run/i);
+    expect(checkReport(s)).toMatch(/no session_start.*preserve/i);   // the degraded-scan fallback
+    expect(checkReport(s)).not.toMatch(/\bmerge\b/i);
+  }
+});
+
+test("--check emits the guidance beneath the verdict as one message", () => {
+  const dir = mkdtempSync(join(tmpdir(), "handoff-check-"));
+  const path = join(dir, "NEXT_SESSION.md");
+  writeFileSync(path, EDITED);
+  const old = new Date(START_MS - 3600_000);
+  utimesSync(path, old, old);
+  const out: string[] = [];
+  expect(main(["--check", path, START], Date.now(), s => void out.push(s))).toBe(0);
+  expect(out).toEqual([checkReport("edited:prior")]);
 });

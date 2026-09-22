@@ -16,6 +16,8 @@ Run at the end of a session. Produces three files:
 
 `/wrap -q` (or `--quick`) does only the local repo work — `NEXT_SESSION.md` and any CLAUDE.md routing. No retro, no journal entry. For a session whose value is a clean pointer rather than a retrospective.
 
+The skill is three files. `SKILL.md` is the spine every wrap loads; `full.md` holds the retro and journal steps and is read only on a full wrap, so `-q` never pays for it; `rationale.md` holds the measured evidence behind each rule and is read only when a rule looks wrong for the case at hand.
+
 ### `/next`
 
 Read-only. Lists every `NEXT_SESSION.md` under the project root, reads the newest, and summarizes "Start here" + "Open threads". Reading the *newest* rather than the cwd-local one is deliberate: cwd varies between sessions in one project, and an autonomous run in a subdirectory writes its own handoff. Use when the SessionStart hook didn't fire or you want to re-consult mid-session.
@@ -24,7 +26,7 @@ The listing is a CLI you can run yourself:
 
 ```bash
 bun run lib/handoffs.ts --cwd "$(pwd)"          # every handoff, newest first
-bun run lib/handoffs.ts --check ./NEXT_SESSION.md   # assistant | edited | unstamped
+bun run lib/handoffs.ts --check ./NEXT_SESSION.md   # assistant | edited | unstamped, and what to do about it
 bun run lib/handoffs.ts --check ./NEXT_SESSION.md 2026-09-18T12:00:00Z  # ...:during | ...:prior
 bun run lib/handoffs.ts --since ./NEXT_SESSION.md   # what landed after its header
 ```
@@ -109,7 +111,7 @@ bun run lib/journal-append.ts --journal $J --actions --tool continuity
 bun run lib/journal-append.ts --journal $J --recent scan.ts
 ```
 
-`--actions` is the improvement backlog, carrying the qualifier the original wrap attached (`(recurring, unmoved)`, `(10th repetition)`). Retired actions come first in a `closed:` block — uncapped, because a reader who never reaches a retired action logs it again — then the newest open ones, then `stale:`, the five oldest nobody has retired. The tail is there because recency alone made the backlog write-only: at 20 rows against 336 actions an item left the view in about four days and was never displayed again, and an action nobody sees is one nobody can close. `--recent` returns whole sections for one tool. Both match tool names loosely, which is the point: headings and action prefixes are free text a model composed, and they drift.
+`--actions` is the improvement backlog, carrying the qualifier the original wrap attached (`(recurring, unmoved)`, `(10th repetition)`). Retired actions come first in a `closed:` block — uncapped, because a reader who never reaches a retired action logs it again — then the newest open ones, then `stale:`, the five oldest nobody has retired, with one line under the label saying what to do with them. The tail is there because recency alone made the backlog write-only: at 20 rows against 336 actions an item left the view in about four days and was never displayed again, and an action nobody sees is one nobody can close. `--recent` returns whole sections for one tool. Both match tool names loosely, which is the point: headings and action prefixes are free text a model composed, and they drift.
 
 How much drift, measured against one real 130-wrap journal: `grep '^- Action:'` reached 143 of 241 action lines, and the 98 it missed skewed toward the long-running ones (`Action (recurring, unmoved)` ×17, `(10th repetition)` ×3). `grep '^### continuity'` reached 109 of 134 sections, across 35 distinct spellings of one plugin's name. Your journal will differ; the failure mode won't.
 

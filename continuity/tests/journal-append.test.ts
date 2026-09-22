@@ -116,3 +116,54 @@ test("--actions takes no value and is unaffected by the guard", () => {
   expect(r.status).toBe(0);
   expect(r.stdout).toContain("do the thing");
 });
+
+// --- stale guidance --------------------------------------------------------
+// The `stale:` block has a job attached: answer each row as open, done, or never,
+// and retire it through `closed`. The instruction sits beside the rows it is
+// about, and only when there are rows, so the skill does not carry it on wraps
+// with nothing stale. Both directions: present with a stale block, absent without.
+
+const MANY = `${HEADER_MATCH}
+
+## 2026-09-01T10:00:00Z  •  proj  •  aaaa1111
+
+### toolA  •  verdict: neutral
+- Action: oldest idea
+
+## 2026-09-02T10:00:00Z  •  proj  •  bbbb2222
+
+### toolB  •  verdict: neutral
+- Action: middle idea
+
+## 2026-09-03T10:00:00Z  •  proj  •  cccc3333
+
+### toolC  •  verdict: neutral
+- Action: newest idea
+`;
+
+function manyActions(): string {
+  const j = join(mkdtempSync(join(tmpdir(), "journal-stale-")), "journal.md");
+  writeFileSync(j, MANY);
+  return j;
+}
+
+test("--actions prints one guidance line under stale: when the block has rows", () => {
+  const r = cli(manyActions(), "--actions", "--limit", "1");
+  expect(r.status).toBe(0);
+  const lines = r.stdout.trimEnd().split("\n");
+  const at = lines.indexOf("stale:");
+  expect(at).toBeGreaterThan(0);
+  const guidance = lines[at + 1];
+  expect(guidance).toMatch(/still open/);
+  expect(guidance).toMatch(/closed/);
+  expect(guidance).not.toMatch(/^\d{4}-\d{2}-\d{2}/);   // not a row
+  expect(lines.length).toBeGreaterThan(at + 2);   // without this the every() below is vacuous
+  expect(lines.slice(at + 2).every(l => /^\d{4}-\d{2}-\d{2}/.test(l))).toBe(true);   // rows follow it
+});
+
+test("--actions prints no stale block and no guidance when everything fits the head", () => {
+  const r = cli(manyActions(), "--actions", "--limit", "20");
+  expect(r.status).toBe(0);
+  expect(r.stdout).not.toContain("stale:");
+  expect(r.stdout).not.toMatch(/still open/);
+});
