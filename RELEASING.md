@@ -5,7 +5,8 @@ Each plugin (`continuity/`, `affirm/`, `pastiche/`) ships independently. There i
 ## What goes where
 
 - `<plugin>/.claude-plugin/plugin.json` — the `version` field. Bump it in the same commit as the change.
-- Annotated tag `<plugin>-vX.Y.Z` at the ship-point on `main`: the merge commit if the work landed via merge (e.g., from a worktree), otherwise the bump commit directly. The tag is what Claude Code's plugin marketplace consumes.
+- Annotated tag `<plugin>-vX.Y.Z` on the **last commit of the release** — the final state you intend people to install. That is usually the bump commit itself (19 of the 30 tags to date), and is later when docs or fixes land after the bump, or when one commit ships several plugins. A merge commit gets the tag when the merge is what lands the release — 3 of `main`'s 4 merges are tagged — but that falls out of the rule rather than being a second rule; do not reach for "merge or bump" as the question. The tag is what Claude Code's plugin marketplace consumes.
+- One commit may carry tags for several plugins. `e472d03` carries `affirm-v0.6.2` and `continuity-v0.9.1`; `792f538` and `cfc597a` carry three each.
 - `~/.claude/plugins/cache/enfurbish/<plugin>/<version>/` — the installed plugin tree on this machine. `~/.claude/plugins/installed_plugins.json` records the version and commit sha.
 
 ## Versioning
@@ -16,14 +17,14 @@ Semver-ish:
 - **minor** (`0.2.x` → `0.3.0`) — new command, new hook, new optional flag
 - **major** (`0.x` → `1.0`) — breaking change for an existing command, hook contract, or storage format
 
-If a change touches more than one plugin, bump them independently with their own commits and tags. They install independently and the marketplace tracks them by name.
+If a change touches more than one plugin, version each one on its own and give each its own tag — they install independently and the marketplace tracks them by name. The bumps may share a commit; `e472d03` bumps `affirm` and `continuity` together and carries both tags.
 
 ## Steps
 
 1. Make the change. Add or update tests. `bun test` green.
 2. Bump `<plugin>/.claude-plugin/plugin.json` `version`.
 3. Commit. Message: `<plugin>: <short summary>` (matches the existing log shape — see `git log --oneline`).
-4. Tag the ship-point on `main` (merge commit if work landed via merge, bump commit otherwise). With HEAD at that commit: `git tag -a <plugin>-vX.Y.Z -m "<plugin> X.Y.Z — <one-line>"`.
+4. Tag the last commit of the release on `main` — the bump commit unless something landed after it. `git tag -a <plugin>-vX.Y.Z <commit> -m "<plugin> X.Y.Z — <one-line>"`; pass the sha explicitly rather than relying on where HEAD happens to sit.
 5. Push branch + tag: `git push && git push origin <plugin>-vX.Y.Z`.
 6. On any machine running the plugin, pull the new version through Claude Code's plugin update flow (the marketplace caches by commit sha, so a `git pull` of the cache directory or a `/plugin update <name>@enfurbish` is required — it is NOT picked up automatically until then).
 
