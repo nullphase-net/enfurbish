@@ -23,6 +23,8 @@ export type BannerInput = {
   meta: Record<string, FileMeta>;
   deep: DeepImport[];
   now: number;
+  /** Who reads it. The terminal gets the call to action; the model gets the fact and a guard. */
+  channel?: "user" | "model";
 };
 
 // `@from <ref>` / `(global)` / `(out-of-tree)` provenance, shown on every state.
@@ -81,7 +83,9 @@ export function buildBanner(input: BannerInput): string {
   }
 
   if (added.length > 0 || changed.length > 0) {
-    msg += "\n⚠ Review unaffirmed files, then run /affirm.";
+    msg += input.channel === "model"
+      ? "\n⚠ Unaffirmed instruction files are in effect. Affirming is the user's attestation; do not run /affirm -a on their behalf."
+      : "\n⚠ Review unaffirmed files, then run /affirm.";
   }
   if (deep.length > 0) {
     msg += "\n" + deepSummary(projectDir, deep);
@@ -147,10 +151,23 @@ if (import.meta.main) {
       meta[gf.path] = base;
     }
 
-    const systemMessage = buildBanner({ projectDir, classification, meta, deep: graph.deep, now: Date.now() });
+    const bannerInput = { projectDir, classification, meta, deep: graph.deep, now: Date.now() };
+    const systemMessage = buildBanner(bannerInput);
     // Nothing to say: a project with no instruction files of its own and every global
     // affirmed would otherwise get a header with no lines under it.
-    process.stdout.write((systemMessage ? JSON.stringify({ systemMessage }) : "{}") + "\n");
+    // Two channels, two readers. systemMessage reaches only the terminal, so
+    // without the second the model runs under an unaffirmed CLAUDE.md with no way
+    // to know. The model's copy swaps the call to action for a guard: affirming is
+    // the user's attestation. Instruction content never goes in on either.
+    process.stdout.write((systemMessage
+      ? JSON.stringify({
+          systemMessage,
+          hookSpecificOutput: {
+            hookEventName: "SessionStart",
+            additionalContext: buildBanner({ ...bannerInput, channel: "model" }),
+          },
+        })
+      : "{}") + "\n");
     process.exit(0);
   } catch {
     process.stdout.write("{}\n");

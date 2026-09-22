@@ -51,6 +51,7 @@ Relay the output.
 - Modify any instruction file. Affirmation is hash-only.
 - Affirm files nothing loads. Scope is `<cwd>/CLAUDE.md` + `<cwd>/.claude/rules/*`, the user-global `~/.claude/CLAUDE.md` + `~/.claude/rules/*`, and whatever any of them `@import` (followed two levels deep; an import pointing outside the project is hashed but flagged out-of-tree). Nested subdirectory CLAUDE.md files are still out of scope unless a tracked file imports one.
 - Prompt the user "are you sure?". The flag is the attestation.
+- Run `-a` unprompted. The attestation is the user's; an assistant affirming the instructions it is running under defeats the gate.
 
 ## Edge cases
 

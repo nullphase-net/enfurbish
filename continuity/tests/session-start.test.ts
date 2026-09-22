@@ -25,15 +25,26 @@ test("emits empty JSON when no NEXT_SESSION.md exists anywhere", () => {
   expect(json).toEqual({});
 });
 
-test("emits only a systemMessage when local NEXT_SESSION.md is present (no context dump)", () => {
+// Two channels, two readers. systemMessage reaches only the terminal; a session on
+// 2026-09-21 read its absence from context as "nothing to report" and could not tell
+// a silent hook from an empty one. The terminal copy keeps the imperative; the model
+// copy states the fact and says not to act on it unprompted. Neither carries the
+// file's CONTENT: /next loads that, when the user asks.
+test("emits the banner on both channels: imperative for the terminal, fact plus guard for the model, no file content on either", () => {
   const dir = mkdtempSync(join(tmpdir(), "continuity-hook-"));
   writeFileSync(join(dir, "NEXT_SESSION.md"), "# Next session\n\nResume the auth refactor.\n");
   const res = runHook({ CLAUDE_PROJECT_DIR: dir });
   expect(res.status).toBe(0);
   const json = JSON.parse(res.stdout);
-  expect(json.systemMessage).toMatch(/^Continuity: NEXT_SESSION.md present/);
-  expect(json.systemMessage).toContain("/next");
-  expect(json.hookSpecificOutput).toBeUndefined();
+  const user: string = json.systemMessage;
+  const model: string = json.hookSpecificOutput.additionalContext;
+  expect(json.hookSpecificOutput.hookEventName).toBe("SessionStart");
+  expect(user).toMatch(/^Continuity: NEXT_SESSION.md present/);
+  expect(user).toContain("Run /next");
+  expect(user).not.toContain("do not run");
+  expect(model).toMatch(/^Continuity: NEXT_SESSION.md present/);
+  expect(model).toContain("do not run it unprompted");
+  expect(model).not.toContain("Run /next");
   expect(JSON.stringify(json)).not.toContain("Resume the auth refactor.");
 });
 

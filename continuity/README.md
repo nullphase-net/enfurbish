@@ -60,7 +60,7 @@ straight back.
 
 ### `SessionStart` hook
 
-Fires on session startup, `/clear`, and post-compact. Walks up to the project root (nearest `.git` or `CLAUDE.md`), recursively scans for `NEXT_SESSION.md` files (depth 4, with an ignore list), and emits a `systemMessage` banner if any are found. The banner names the file(s) and suggests `/next`. **The handoff content is not loaded into context until you ask** — so a fresh session stays clean if you don't want to pick up.
+Fires on session startup, `/clear`, and post-compact. Walks up to the project root (nearest `.git` or `CLAUDE.md`), recursively scans for `NEXT_SESSION.md` files (depth 4, with an ignore list), and emits a one-line banner if any are found, on both channels: `systemMessage` for the terminal and `additionalContext` for the model, so a session knows a pointer exists without loading it. The banner names the file(s); the terminal copy suggests `/next`, the model's copy says the user may run it and not to run it unprompted. **The handoff content is not loaded into context until you ask** — so a fresh session stays clean if you don't want to pick up.
 
 Three states:
 

@@ -1,11 +1,11 @@
 ---
 name: next
-description: Manually read the project's newest NEXT_SESSION.md and brief the user on what's pending. Mirror of the SessionStart hook for cases where the hook didn't fire or the user wants to re-consult mid-session.
+description: Read the project's newest NEXT_SESSION.md and brief the user on what's pending. Invoke as /next when the user wants to pick up where the last session left off.
 ---
 
-# `/next` — manual NEXT_SESSION read
+# `/next` — read the handoff
 
-Use when the user wants to pick up where the last session left off and either the SessionStart hook didn't surface anything, was disabled, or the user wants to re-consult later in the session.
+Use when the user wants to pick up where the last session left off, or to re-consult the handoff mid-session.
 
 ## Procedure
 

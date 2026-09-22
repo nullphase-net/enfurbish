@@ -50,6 +50,8 @@ export function buildBanner(opts: {
   projectRoot: string;
   handoffs: Handoff[];
   now?: number;
+  /** Who reads it. The terminal gets the imperative; the model gets the fact and a guard. */
+  channel?: "user" | "model";
 }): string | null {
   const now = opts.now ?? Date.now();
   const local = opts.handoffs.find(h => h.local);
@@ -61,7 +63,10 @@ export function buildBanner(opts: {
     `\n  - ${relative(opts.projectRoot, h.path)}  (modified ${fmtAge(h.mtimeMs, now)}${fmtBehind(h)})`;
 
   if (local) {
-    let msg = `Continuity: NEXT_SESSION.md present from your last wrap (modified ${fmtAge(local.mtimeMs, now)}${fmtBehind(local)}). Run /next to pick it up.`;
+    const cta = opts.channel === "model"
+      ? "The user may run /next to pick it up; do not run it unprompted."
+      : "Run /next to pick it up.";
+    let msg = `Continuity: NEXT_SESSION.md present from your last wrap (modified ${fmtAge(local.mtimeMs, now)}${fmtBehind(local)}). ${cta}`;
     if (local.commitsSince) {
       msg += ` Commits landed after it was written — some open threads are likely already done.`;
     }
@@ -138,7 +143,9 @@ if (import.meta.main) {
     // on the same blocking path the walk is on, so it belongs in the same budget:
     // timing only the walk under-reports the hook by exactly the part that can hang.
     const t0 = performance.now();
-    const banner = buildBanner({ sessionCwd, projectRoot, handoffs: collect(sessionCwd, projectRoot, files) });
+    const handoffs = collect(sessionCwd, projectRoot, files);
+    const now = Date.now();
+    const banner = buildBanner({ sessionCwd, projectRoot, handoffs, now });
     const totalMs = elapsedMs + (performance.now() - t0);
     debugLog(`cwd=${sessionCwd} root=${projectRoot} files=${files.length} elapsedMs=${totalMs.toFixed(1)} walkMs=${elapsedMs.toFixed(1)} emit=${banner === null ? "empty" : "banner"}`);
     if (banner === null) {
@@ -149,7 +156,18 @@ if (import.meta.main) {
       const withNote = totalMs > slowMs
         ? banner + formatSlowNote(totalMs, walks)
         : banner;
-      process.stdout.write(JSON.stringify({ systemMessage: withNote }) + "\n");
+      // Two channels, two readers. systemMessage reaches only the terminal, and a
+      // model that cannot see the banner reads its absence as "nothing to report".
+      // The model's copy carries the fact and a guard, not the imperative; the
+      // slow-scan note is operator diagnostics and stays on the terminal. File
+      // content enters context only via /next.
+      process.stdout.write(JSON.stringify({
+        systemMessage: withNote,
+        hookSpecificOutput: {
+          hookEventName: "SessionStart",
+          additionalContext: buildBanner({ sessionCwd, projectRoot, handoffs, now, channel: "model" }) ?? banner,
+        },
+      }) + "\n");
     }
     process.exit(0);
   } catch (e) {
