@@ -104,16 +104,21 @@ dedupes against the ledger and within itself, reports every skip, and writes onc
 
 ```
 $ printf 'la red — network\nel hilo — thread\n' | bun run lib/pastiche.ts --add es -
-+ - es: el hilo — thread | 2026-08-18 | seen: 2026-08-18
-exists: la red — network
++ - es: el hilo — thread | 2026-09-23 | seen: 2026-09-23
+dupe: la red ×1 — restamped 2026-09-23
+  have: es: la red — network | 2026-08-11 | seen: 2026-09-23
 (2 entries)
 ```
 
-Dedupe runs at two depths. An exact repeat reports `exists:`. A *reworded gloss of a term
-already in the ledger* reports `dupe:` and hands back the line that is already there, because
-the substring test cannot see it — measured on a real ledger, that miss produced 69 duplicated
-terms and 168 redundant lines, `el umbral` seventeen times, each one reported as new. When the
-term is already known the right move is `--mark` or `--tag`, not a tenth copy.
+Dedupe matches on the *head* — the term before its gloss — in the same language, so a
+reworded gloss is caught as well as an exact repeat. Measured on a real ledger before this
+existed: 69 duplicated terms and 168 redundant lines, `el umbral` seventeen times, each one
+reported as new. A dupe is not refused, it is **restamped**: the session reached for the term,
+so it was surfaced, which is what `--seen` records. Every copy moves together and the `×N` says
+how many there are. The refusal it replaced cost three or four round trips per session
+(`--add`, read the existing line, `--seen`) to reach the same write. `exists:` remains for the
+one case with nothing to restamp: the body is in the file, but under a different language or
+inside another term's gloss.
 
 Bare `--add <code>` with no body is still arg misuse (exit 2), not a blocking read on a tty —
 the `-` is required to ask for stdin.

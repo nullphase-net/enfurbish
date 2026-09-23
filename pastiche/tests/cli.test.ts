@@ -63,8 +63,8 @@ describe("--add", () => {
 
   test("does not create a duplicate", () => {
     const c = fixture(SEED);
-    main(["--add", "es", "la red — network"], c);
-    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+    main(["--add", "es", "la red — network"], c, () => {});
+    expect(readFileSync(c.ledger, "utf8").split("\n").filter(Boolean).length).toBe(2);
   });
 
   test("a missing argument is arg misuse, not a no-op", () => {
@@ -176,14 +176,17 @@ describe("--add - (batch from stdin)", () => {
       .toBe(`${SEED}- km: ខ្សែ (khsae) — thread | ${NOW} | seen: ${NOW}\n`);
   });
 
-  test("reports a duplicate against the ledger without dropping the rest", () => {
+  test("restamps a duplicate against the ledger without dropping the rest", () => {
     const c = fixture(SEED);
     const out: string[] = [];
     main(["--add", "es", "-"], c, s => void out.push(s),
       feed("la red — network\nel puerto — port\n"));
-    expect(out.filter(s => s.startsWith("exists:"))).toEqual(["exists: la red — network"]);
-    expect(readFileSync(c.ledger, "utf8"))
-      .toBe(`${SEED}- es: el puerto — port | ${NOW} | seen: ${NOW}\n`);
+    expect(out).toContain(`dupe: la red ×1 — restamped ${NOW}`);
+    expect(readFileSync(c.ledger, "utf8")).toBe(
+      "- km: ទឹក (teuk) — water | 2026-01-01 | seen: 2026-01-01\n" +
+      `- es: la red — network | 2026-02-01 | ✓ | seen: ${NOW}\n` +
+      `- es: el puerto — port | ${NOW} | seen: ${NOW}\n`,
+    );
   });
 
   test("dedupes within the batch itself", () => {
@@ -254,7 +257,7 @@ describe("--correct", () => {
     main(args, c);
     const out: string[] = [];
     main(args, c, s => void out.push(s));
-    expect(out.some(l => l.startsWith("exists:"))).toBe(true);
+    expect(out.some(l => l.startsWith("dupe: costa → cuesta ×1"))).toBe(true);
     expect(readFileSync(c.ledger, "utf8").split("\n").filter(Boolean).length).toBe(3);
   });
 });
@@ -283,12 +286,14 @@ describe("--tag", () => {
     expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
   });
 
-  test("re-tagging to the same subject reports nothing-to-change rather than a write", () => {
+  // "nothing to change" read to sessions as a failure (journal, 2026-09-22) —
+  // the state they asked for is the state on disk, so say that instead.
+  test("re-tagging to the same subject reports already-current rather than a write", () => {
     const c = fixture(SEED);
     const out: string[] = [];
     main(["--tag", "la red", "networking"], c, () => {});
     expect(main(["--tag", "la red", "networking"], c, s => void out.push(s))).toBe(0);
-    expect(out[0]).toContain("nothing to change");
+    expect(out[0]).toBe('already current: "la red" -> networking');
   });
 });
 
@@ -319,21 +324,67 @@ describe("--add with a subject", () => {
 });
 
 describe("--add duplicate detection", () => {
-  test("a reworded gloss of an existing term is reported, not minted as new", () => {
+  // A dupe restamps rather than refusing. Four consecutive journal entries
+  // (2026-09-22..23) logged the refusal costing 3–4 round trips — --add, read the
+  // `have:` line, --seen — to reach the one write the CLI had already diagnosed.
+  const RESTAMPED =
+    "- km: ទឹក (teuk) — water | 2026-01-01 | seen: 2026-01-01\n" +
+    `- es: la red — network | 2026-02-01 | ✓ | seen: ${NOW}\n`;
+
+  test("a reworded gloss of an existing term restamps it, not minted as new", () => {
     const c = fixture(SEED);
     const out: string[] = [];
     expect(main(["--add", "es", "la red — the network, a mesh of hosts"], c, s => void out.push(s))).toBe(0);
-    expect(out.join("\n")).toContain("dupe: la red");
+    expect(out).toContain(`dupe: la red ×1 — restamped ${NOW}`);
     expect(out.join("\n")).toContain("have: es: la red — network");
     expect(out.join("\n")).not.toContain("+ - es: la red — the network");
-    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+    expect(readFileSync(c.ledger, "utf8")).toBe(RESTAMPED);
   });
 
-  test("an exact repeat still reports exists:, which is the other miss", () => {
+  test("an exact repeat restamps the same way", () => {
     const c = fixture(SEED);
     const out: string[] = [];
     expect(main(["--add", "es", "la red — network"], c, s => void out.push(s))).toBe(0);
-    expect(out.join("\n")).toContain("exists:");
+    expect(out).toContain(`dupe: la red ×1 — restamped ${NOW}`);
+    expect(readFileSync(c.ledger, "utf8")).toBe(RESTAMPED);
+  });
+
+  // Copies rotate together or the stale ones crowd the due list, so every line
+  // with the same head moves. A line that only MENTIONS the term in its gloss is
+  // a different term and must not — that is what head matching buys over --seen's
+  // substring needle.
+  test("restamps every copy, counts them, and leaves a gloss mention alone", () => {
+    const seed =
+      "- es: el umbral — threshold | 2026-08-15 | seen: 2026-09-01\n" +
+      "- es: la cota — bound (cf. el umbral) | 2026-08-16 | seen: 2026-09-02\n" +
+      "- es: el umbral — threshold (cruzar el umbral) | 2026-08-17 | subj: math | seen: 2026-09-03\n";
+    const c = fixture(seed);
+    const out: string[] = [];
+    expect(main(["--add", "es", "el umbral — the tripwire"], c, s => void out.push(s))).toBe(0);
+    expect(out[0]).toBe(`dupe: el umbral ×2 — restamped ${NOW}`);
+    expect(readFileSync(c.ledger, "utf8")).toBe(
+      `- es: el umbral — threshold | 2026-08-15 | seen: ${NOW}\n` +
+      "- es: la cota — bound (cf. el umbral) | 2026-08-16 | seen: 2026-09-02\n" +
+      `- es: el umbral — threshold (cruzar el umbral) | 2026-08-17 | subj: math | seen: ${NOW}\n`,
+    );
+  });
+
+  test("a dupe already stamped today says so and writes nothing", () => {
+    const c = fixture(RESTAMPED);
+    const out: string[] = [];
+    expect(main(["--add", "es", "la red — network"], c, s => void out.push(s))).toBe(0);
+    expect(out[0]).toBe(`dupe: la red ×1 — already ${NOW}`);
+    expect(readFileSync(c.ledger, "utf8")).toBe(RESTAMPED);
+  });
+
+  // The one shape `exists:` still covers: the body is on disk, but under no line
+  // with this language and head, so there is no term to restamp.
+  test("an exact body under another language reports exists: and writes nothing", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    expect(main(["--add", "km", "la red — network"], c, s => void out.push(s))).toBe(0);
+    expect(out).toEqual(["exists: la red — network"]);
+    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
   });
 
   test("a genuinely new term is still added", () => {
@@ -358,6 +409,8 @@ describe("--add duplicate detection", () => {
     const joined = out.join("\n");
     expect(joined).toContain("dupe: la red");
     expect(joined).toContain("+ - es: el hilo — thread");
-    expect(readFileSync(c.ledger, "utf8")).toContain("el hilo — thread");
+    const text = readFileSync(c.ledger, "utf8");
+    expect(text).toContain("el hilo — thread");
+    expect(text).toContain(`la red — network | 2026-02-01 | ✓ | seen: ${NOW}`);
   });
 });

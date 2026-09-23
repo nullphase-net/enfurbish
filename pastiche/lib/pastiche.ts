@@ -278,7 +278,7 @@ Write the ledger with these, never by editing the file — they own the format:
   P=${join(pluginRoot, "lib", "pastiche.ts")}
   bun run $P --seen "<term>"                 # used it — rotates it out
   bun run $P --mark "<term>"                 # they used it right — ✓ and rotate
-  bun run $P --add <code> "<term> — <gloss>" [subject]   # new or primed item
+  bun run $P --add <code> "<term> — <gloss>" [subject]   # new or primed item; a repeat restamps
   bun run $P --add <code> - [subject]        # ...or several, one per stdin line
   bun run $P --tag "<term>" "<subject>"      # tag a term already in the ledger
   bun run $P --correct <code> "<wrong>" "<right>" "<rule>"   # they corrected you`;
@@ -305,16 +305,16 @@ export function headOf(body: string): string {
 }
 
 /**
- * The first ledger line for the same language and the same head term, or "".
+ * Every ledger line for the same language and the same head term.
  * This is the check `text.includes(body)` cannot make: nine sessions wrote nine
- * glosses of `el registro` and each one looked new.
+ * glosses of `el registro` and each one looked new. All of them, not the first,
+ * because copies have to rotate together.
  */
-export function sameTerm(text: string, code: string, body: string): string {
+export function sameTerm(text: string, code: string, body: string): string[] {
   const head = headOf(body);
-  for (const e of parseLedger(text)) {
-    if (e.code === code && headOf(e.term) === head) return e.line;
-  }
-  return "";
+  return parseLedger(text)
+    .filter(e => e.code === code && headOf(e.term) === head)
+    .map(e => e.line);
 }
 
 /**
@@ -393,11 +393,11 @@ export function main(
     }
 
     const after = fn(before, needle, arg);
-    if (before === after) {
-      return out(`already ${arg} — ${hits.length} matched, nothing to change`), 0;
-    }
-    writeLedger(cfg.ledger, after);
     const n = hits.length > 1 ? ` (${hits.length} lines)` : "";
+    // Worded as the success it is: the state asked for is the state on disk.
+    // "nothing to change" read to sessions as a failure.
+    if (before === after) return out(`already current: ${JSON.stringify(needle)} -> ${arg}${n}`), 0;
+    writeLedger(cfg.ledger, after);
     return out(`${verb} ${JSON.stringify(needle)} -> ${arg}${n}`), 0;
   };
 
@@ -446,29 +446,43 @@ export function main(
     const added: string[] = [];
     const skipped: string[] = [];
     const dupes: string[] = [];
+    const date = today();
     for (const b of bodies) {
-      // Exact-substring dedupe. Matching against the accumulator, not `before`,
-      // also dedupes within a batch.
+      // The same term, by head — the part before the gloss — which catches a
+      // reworded gloss the substring test below cannot see. It piled up as the
+      // old comment here guessed: 69 terms duplicated, 168 redundant lines,
+      // `el umbral` seventeen times, each reported as new. Matching against the
+      // accumulator, not `before`, also dedupes within a batch.
+      //
+      // A hit is restamped, not refused: the session reached for the term, so it
+      // was surfaced, and refusing cost 3–4 round trips to reach this same write
+      // (journal, four consecutive entries 2026-09-22..23). The copy count goes
+      // out with it — it is data about the ledger's shape, not noise.
+      const hits = sameTerm(text, code, b);
+      if (hits.length) {
+        const after = hits.reduce((t, l) => restamp(t, l, date), text);
+        const state = after === text ? "already" : "restamped";
+        dupes.push(
+          `dupe: ${headOf(b)} ×${hits.length} — ${state} ${date}`,
+          `  have: ${restamp(hits[0], hits[0], date).slice(2, 96)}`,
+        );
+        text = after;
+        continue;
+      }
+      // The body is on disk but under no line with this language and head — a
+      // gloss mention, another language — so there is no term to restamp.
       if (text.includes(b)) { skipped.push(b); continue; }
-      // ...and the same term under a reworded gloss, which the substring test
-      // cannot see. It piled up exactly as the old comment here guessed it might:
-      // 69 terms duplicated, 168 redundant lines, `el umbral` seventeen times,
-      // every one of them reported as a new entry. Compare the head — the part
-      // before the gloss — and hand back what is already there, so the session
-      // can --mark or --tag it instead of minting a tenth copy.
-      const hit = sameTerm(text, code, b);
-      if (hit) { dupes.push(`${headOf(b)}\n  have: ${hit.slice(2, 96)}`); continue; }
-      const line = formatEntry(code, b, today(), marks, subject);
+      const line = formatEntry(code, b, date, marks, subject);
       text = text && !text.endsWith("\n") ? `${text}\n${line}\n` : `${text}${line}\n`;
       added.push(line);
     }
-    if (added.length) {
+    if (text !== before) {
       mkdirSync(dirname(cfg.ledger), { recursive: true });
       writeLedger(cfg.ledger, text);
     }
     for (const l of added) out(`+ ${l}`);
     for (const b of skipped) out(`exists: ${b}`);
-    for (const d of dupes) out(`dupe: ${d}`);
+    for (const d of dupes) out(d);
     if (added.length) out(`(${parseLedger(before).length + added.length} entries)`);
     return 0;
   }
