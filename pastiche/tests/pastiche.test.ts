@@ -4,8 +4,8 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  buildContext, formatCorrection, formatEntry, loadConfig, loadNotes, mark, parseLedger,
-  restamp, stalest, tag, today,
+  buildContext, DORMANT_AFTER, formatCorrection, formatEntry, loadConfig, loadNotes, mark,
+  parseLedger, recordSurfaced, restamp, stalest, tag, today, type Entry, type Surfaced,
 } from "../lib/pastiche";
 
 const LEDGER = `# Ledger
@@ -61,6 +61,61 @@ describe("stalest", () => {
 
   test("n larger than the ledger is not an error", () => {
     expect(stalest(parseLedger(LEDGER), 99).length).toBe(4);
+  });
+});
+
+// The hook told every session a skipped due item "rotates back", and nothing
+// rotated it: ប៉ា headed the due list from 2026-09-02 to 2026-09-24 (symbion 7c2).
+describe("dormancy", () => {
+  const FAMILY =
+    "- km: ប៉ា (pa) — dad | 2026-01-01 | seen: 2026-01-01\n" +
+    "- km: ម៉ាក់ (mak) — mom | 2026-01-01 | seen: 2026-02-01\n";
+  const DAD = "ប៉ា (pa) — dad";
+  const MOM = "ម៉ាក់ (mak) — mom";
+
+  // Each id is one session start that showed the head of the list and did not use it.
+  function show(entries: Entry[], ids: string[], date = "2026-03-01", s: Surfaced = {}): Surfaced {
+    return ids.reduce((acc, id) => recordSurfaced(acc, stalest(entries, 1, acc), id, date), s);
+  }
+
+  test(`an item shown in ${DORMANT_AFTER} sessions without use rotates behind fresher ones`, () => {
+    const e = parseLedger(FAMILY);
+    const ids = Array.from({ length: DORMANT_AFTER }, (_, i) => `s${i}`);
+    expect(stalest(e, 1, show(e, ids.slice(0, -1)))[0].term).toBe(DAD);
+    expect(stalest(e, 1, show(e, ids))[0].term).toBe(MOM);
+  });
+
+  test("a re-fire in the same session (compaction, resume) counts once", () => {
+    const e = parseLedger(FAMILY);
+    // Exactly DORMANT_AFTER: any more and a miscount rotates mom out too, and
+    // the ledger-order tie-break puts dad back on top.
+    const s = show(e, Array(DORMANT_AFTER).fill("same"));
+    expect(stalest(e, 1, s)[0].term).toBe(DAD);
+  });
+
+  test("using it starts the count over", () => {
+    const e = parseLedger(FAMILY);
+    const almost = Array.from({ length: DORMANT_AFTER - 1 }, (_, i) => `a${i}`);
+    const s = show(e, almost);
+    // Used in the last of those sessions, but still staler than mom.
+    const used = parseLedger(restamp(FAMILY, "(pa)", "2026-01-15"));
+    const again = show(used, almost.map(id => `b${id}`), "2026-03-01", s);
+    expect(stalest(used, 1, again)[0].term).toBe(DAD);
+  });
+
+  test("a rotated item comes back once the rest have rotated past it, and counts afresh", () => {
+    const e = parseLedger(FAMILY);
+    const ids = (p: string) => Array.from({ length: DORMANT_AFTER }, (_, i) => `${p}${i}`);
+    let s = show(e, ids("dad"), "2026-03-01");
+    expect(stalest(e, 1, s)[0].term).toBe(MOM);
+    s = show(e, ids("mom"), "2026-03-02", s);
+    expect(stalest(e, 1, s)[0].term).toBe(DAD);
+    // One session at a time, for the same tie-break reason: a count carried
+    // over from before the rotation sends dad back on the first showing.
+    for (const id of ids("again").slice(0, -1)) {
+      s = show(e, [id], "2026-03-03", s);
+      expect(stalest(e, 1, s)[0].term).toBe(DAD);
+    }
   });
 });
 
@@ -173,12 +228,12 @@ describe("buildContext", () => {
     languages: [{ code: "km", name: "Khmer", domains: "everyday, family" }],
   };
 
-  test("lists the due items with their last-surfaced dates", () => {
+  test("lists the due items with their last-used dates", () => {
     const out = buildContext({
       cfg, due: stalest(parseLedger(LEDGER), 2), notes: "", pluginRoot: "/plugins/pastiche",
     });
     expect(out).toContain("ផ្ទះ (phteah) — house");
-    expect(out).toContain("[last surfaced 2026-01-05]");
+    expect(out).toContain("[last used 2026-01-05]");
     expect(out).toContain("Khmer (km) — everyday, family");
     expect(out).toContain("/plugins/pastiche/lib/pastiche.ts");
   });
@@ -228,6 +283,16 @@ describe("buildContext", () => {
     expect(out).toContain("scheduling mismatch");
     expect(out).toContain("subject");
     expect(out).not.toContain("register");
+  });
+
+  // 7c2: "it rotates back" was a promise no code kept. The text now states the
+  // rule the hook enforces, with the number the hook uses.
+  test("says when a skipped due item leaves the list, with the count the code uses", () => {
+    const out = buildContext({
+      cfg, due: stalest(parseLedger(LEDGER), 2), notes: "", pluginRoot: "/p",
+    });
+    expect(out).toContain(`${DORMANT_AFTER} sessions`);
+    expect(out).not.toContain("it rotates back.");
   });
 
   // recordar (to remember) went out as "ya está recordado" for "recorded". The
@@ -369,8 +434,8 @@ describe("subject tags", () => {
       "- es: la red — network | 2026-02-01 | seen: 2026-02-02\n",
     );
     const ctx = buildContext({ cfg, due, notes: "", pluginRoot: "/p" });
-    expect(ctx).toContain("- es: la tierra — ground  [rf, hardware]  [last surfaced 2026-02-01]");
-    expect(ctx).toContain("- es: la red — network  [last surfaced 2026-02-02]");
+    expect(ctx).toContain("- es: la tierra — ground  [rf, hardware]  [last used 2026-02-01]");
+    expect(ctx).toContain("- es: la red — network  [last used 2026-02-02]");
     expect(ctx).not.toContain("la red — network  []");
   });
 });

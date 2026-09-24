@@ -42,7 +42,8 @@ Write `~/.claude/pastiche/config.json`:
 - `fresh` — how many *new* terms to introduce per session. Separate budget from `due`, so a
   long ledger can't starve intake. Set it to `0` for reinforcement only.
 - `languages` — `domains` is the routing rule. The session picks a language by what the
-  conversation is about, so the split should follow your life, not a curriculum.
+  conversation is about, so the split should follow your life, not a curriculum. `code` is a
+  BCP 47 tag: `km`, `yue`, `pt-BR`.
 
 `languages` is the on switch. Configure at least one and the hook runs whether or not a
 ledger exists yet — with no file, the first terms a session introduces start it. Copy
@@ -55,7 +56,7 @@ ledger exists yet — with no file, the first terms a session introduces start i
 ```
 
 Language code, term, gloss, introduce date, optional marks, optional `subj:` tag,
-last-surfaced date. Everything between the gloss and `seen:` is free text — pronunciation
+last-used date. Everything between the gloss and `seen:` is free text — pronunciation
 notes, where you heard it, who says it differently. The parser only needs the leading code
 and the trailing `seen:`.
 
@@ -66,9 +67,13 @@ seven sessions it kept re-deriving the same three — ប៉ា (dad), la tierra
 la valuación — into technical work they could never fit. The tag doesn't filter anything;
 it hands over evidence the ledger already had. Untagged lines surface exactly as before.
 
-`seen:` is the whole rotation mechanism. Sessions restamp what they use, so used items move
-to the back and unused ones drift to the front. There are no intervals and no ease factors:
-an item you never reinforce keeps coming back until something restamps it.
+Rotation has two inputs. Sessions restamp what they use, so used items move to the back and
+unused ones drift to the front. And an item the hook shows in 3 sessions that never use it
+moves to the back on its own, dated that day, and comes back once everything else has rotated
+past it. Without that, the few items no session had an opening for held the head of the due
+list for three weeks. The hook keeps the count in `surfaced.json` beside your config, one
+entry per session, so re-injecting after a compaction counts once. There are no intervals and
+no ease factors.
 
 Marks accumulate and are never decayed. A line with four ✓ on it is a line you have used
 four times, not a claim about how well you know it now — `seen:` is what drives selection.
@@ -94,8 +99,8 @@ Sessions call these; they don't edit the ledger. Formatting a line, stamping tod
 into two fields, and inserting a marks field that may or may not already exist are
 deterministic operations, so they belong in code where they can be tested — not in a format
 string the model reassembles from memory each time. `--add` creates the file and its parent
-directory on first use, rejects a language code you haven't configured, and won't duplicate
-a term already present.
+directory on first use, rejects a language code you haven't configured or that the ledger
+could not read back, and won't duplicate a term already present.
 
 `--add <code> -` batches a whole session's additions into one call. Each `Bash` call is an
 independent chance for the permission layer to block, so adding N terms one-per-call meant N

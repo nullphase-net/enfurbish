@@ -2,7 +2,10 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { buildContext, loadConfig, loadNotes, parseLedger, stalest } from "../lib/pastiche";
+import {
+  buildContext, loadConfig, loadNotes, loadSurfaced, parseLedger, recordSurfaced, saveSurfaced,
+  stalest, today,
+} from "../lib/pastiche";
 
 function debugLog(line: string) {
   if (!process.env.PASTICHE_DEBUG) return;
@@ -12,14 +15,38 @@ function debugLog(line: string) {
   } catch { /* best-effort */ }
 }
 
-export function buildOutput(pluginRoot: string): string | null {
+/**
+ * Claude Code sends every hook a JSON payload on stdin. A manual run sends
+ * none, and counts nothing: a count needs a session to dedupe on.
+ */
+function readSessionId(): string | null {
+  try {
+    const obj = JSON.parse(readFileSync(0, "utf8"));
+    return typeof obj?.session_id === "string" ? obj.session_id : null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildOutput(pluginRoot: string, sessionId: string | null = null): string | null {
   const cfg = loadConfig();
   // The gate is configured languages, not the ledger. With nothing to teach,
   // stay silent; with something to teach but no ledger yet, teach and let the
   // session start the file. Otherwise a fresh install never learns anything.
   if (!cfg.languages.length) return null;
   const text = existsSync(cfg.ledger) ? readFileSync(cfg.ledger, "utf8") : "";
-  const due = stalest(parseLedger(text), cfg.due);
+  const surfaced = loadSurfaced(cfg.surfaced);
+  const due = stalest(parseLedger(text), cfg.due, surfaced);
+  // Re-injecting after a compaction is the point (vocabulary the model can't see
+  // is vocabulary it can't use), so there is no re-fire suppression here; the
+  // count dedupes on session_id instead.
+  if (sessionId && cfg.surfaced) {
+    try {
+      saveSurfaced(cfg.surfaced, recordSurfaced(surfaced, due, sessionId, today()));
+    } catch (e) {
+      debugLog(`surfaced not saved: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
   return buildContext({ cfg, due, notes: loadNotes(pluginRoot, cfg), pluginRoot });
 }
 
@@ -28,7 +55,7 @@ if (import.meta.main) {
   // user nothing more than a session without vocabulary in it.
   try {
     const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || join(import.meta.dir, "..");
-    const context = buildOutput(pluginRoot);
+    const context = buildOutput(pluginRoot, readSessionId());
     if (context === null) {
       debugLog("no configured languages — emitting empty");
       process.stdout.write("{}\n");

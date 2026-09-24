@@ -11,6 +11,11 @@ export type Config = {
   due: number;
   /** New items introduced per session. 0 turns introduction off entirely. */
   fresh: number;
+  /**
+   * The hook's surfacing counts (`recordSurfaced`). Derived from the config dir,
+   * never set by the user; absent means "read none", which is what tests want.
+   */
+  surfaced?: string;
 };
 export type Entry = {
   line: string;
@@ -38,7 +43,9 @@ export function expandTilde(p: string): string {
 }
 
 export function loadConfig(dir = pasticheDir()): Config {
-  const fallback: Config = { ledger: join(dir, "ledger.md"), languages: [], due: 5, fresh: 2 };
+  const fallback: Config = {
+    ledger: join(dir, "ledger.md"), languages: [], due: 5, fresh: 2, surfaced: join(dir, "surfaced.json"),
+  };
   const path = join(dir, "config.json");
   if (!existsSync(path)) return fallback;
   try {
@@ -48,6 +55,7 @@ export function loadConfig(dir = pasticheDir()): Config {
       languages: Array.isArray(raw.languages) ? raw.languages : fallback.languages,
       due: Number.isFinite(raw.due) ? raw.due : fallback.due,
       fresh: Number.isFinite(raw.fresh) ? raw.fresh : fallback.fresh,
+      surfaced: fallback.surfaced,
     };
   } catch {
     // Malformed config must not break the session — fall back to defaults.
@@ -55,7 +63,10 @@ export function loadConfig(dir = pasticheDir()): Config {
   }
 }
 
-const CODE = /^- ([a-z]{2}): /;
+// A BCP 47 shape (`km`, `yue`, `pt-BR`), because config holds whatever the user
+// names a language and `--add` writes it verbatim. `--add` refuses a code this
+// cannot read back, so the two cannot drift apart again.
+const CODE = /^- ([a-z]{2,3}(?:-[A-Za-z0-9]+)*): /;
 const DATE = /(\d{4}-\d{2}-\d{2})/;
 const SEEN = /seen: (\d{4}-\d{2}-\d{2})/;
 // Lazy + lookahead so the capture stops before the space that separates it
@@ -91,16 +102,89 @@ export function parseLedger(text: string): Entry[] {
 }
 
 /**
- * Stalest-first by `seen:`. Ties keep ledger order (Array.sort is stable), so
- * the selection is deterministic for a given file.
+ * Stalest-first by rotation date: `seen:`, or the date the item went dormant
+ * if that is later. Ties keep ledger order (Array.sort is stable), so the
+ * selection is deterministic for a given file and sidecar.
  *
- * ponytail: rotation comes from restamping, not from the sort. An item the
- * session used gets today's date and drops to the back on its own. If nothing
- * restamps, the same items keep surfacing — which is the correct failure mode
- * for vocabulary that never got reinforced.
+ * An item the session used gets today's `seen:` and drops to the back. One it
+ * was shown and never used drops back after `DORMANT_AFTER` sessions instead
+ * of heading the list forever — ប៉ា did, 2026-09-02 to 2026-09-24.
  */
-export function stalest(entries: Entry[], n: number): Entry[] {
-  return [...entries].sort((a, b) => a.seen.localeCompare(b.seen)).slice(0, n);
+export function stalest(entries: Entry[], n: number, surfaced: Surfaced = {}): Entry[] {
+  return entries
+    .map(e => ({ e, at: rotation(e, surfaced) }))
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .slice(0, n)
+    .map(x => x.e);
+}
+
+/** Sessions that may show an item without using it before it rotates to the back. */
+export const DORMANT_AFTER = 3;
+
+/**
+ * Per item: the date its count started (or it last rotated), and the sessions
+ * that have shown it since. Keyed by code and term, not by line, so a tag or a
+ * ✓ does not reset the count; a new gloss does, which is fine.
+ */
+export type Surfaced = Record<string, { at: string; sessions: string[] }>;
+
+const keyOf = (e: Entry) => `${e.code}: ${e.term}`;
+
+function rotation(e: Entry, s: Surfaced): string {
+  const at = s[keyOf(e)]?.at;
+  return typeof at === "string" && at > e.seen ? at : e.seen;
+}
+
+/**
+ * Count one session against each item it was shown. The item whose count
+ * reaches `DORMANT_AFTER` rotates to the back, dated `date`, as if a session
+ * had used it then; it comes back when everything else has rotated past it.
+ *
+ * Sessions, not hook runs: a compaction or resume re-fires the hook under the
+ * same session_id and counts once. A `seen:` later than the record means a
+ * session used the item, so the count starts over.
+ *
+ * ponytail: dates, not timestamps — an item used on the same day its count
+ * started does not reset it. Only a ledger small enough to show an item twice
+ * in one day can hit that; store timestamps if one does.
+ * ponytail: never pruned. At most one record per term ever shown, so it is
+ * bounded by the ledger; dead records (`at` older than `seen:`) are ignored.
+ */
+export function recordSurfaced(s: Surfaced, shown: Entry[], sessionId: string, date: string): Surfaced {
+  const next = { ...s };
+  for (const e of shown) {
+    const k = keyOf(e);
+    const prev = next[k];
+    const rec = prev && Array.isArray(prev.sessions) && prev.at >= e.seen
+      ? prev
+      : { at: e.seen, sessions: [] as string[] };
+    if (rec.sessions.includes(sessionId)) continue;
+    const sessions = [...rec.sessions, sessionId];
+    next[k] = sessions.length >= DORMANT_AFTER ? { at: date, sessions: [] } : { at: rec.at, sessions };
+  }
+  return next;
+}
+
+/** Missing, unreadable or malformed reads as empty: the counts are a hint, never a gate. */
+export function loadSurfaced(path?: string): Surfaced {
+  if (!path || !existsSync(path)) return {};
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8"));
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The hook is the only writer. It is not the ledger: every ledger write still
+ * goes through the CLI, and this file holds nothing a session should read.
+ *
+ * ponytail: read-modify-write with no lock. Two sessions starting in the same
+ * instant can lose one count, which costs an item one more showing.
+ */
+export function saveSurfaced(path: string, s: Surfaced): void {
+  writeAtomic(path, `${JSON.stringify(s)}\n`);
 }
 
 /** Rewrite `seen:` to `date` on every ledger line containing `needle`. */
@@ -214,7 +298,7 @@ export function buildContext(opts: {
     : "- (none configured — see the plugin README)";
   const dueList = due.length
     ? due.map(e =>
-        `  - ${e.code}: ${e.term}${e.subject ? `  [${e.subject}]` : ""}  [last surfaced ${e.seen}]`,
+        `  - ${e.code}: ${e.term}${e.subject ? `  [${e.subject}]` : ""}  [last used ${e.seen}]`,
       ).join("\n")
     : "  (nothing due yet — the ledger is empty or not created; the first terms you\n" +
       "   introduce start it)";
@@ -237,8 +321,9 @@ Re-surface the due items listed below — that is what the learner is forgetting
 right now. Re-teach without ceremony; forgetting is expected, not a failure.
 
 A due item the session gives no opening is a scheduling mismatch, not a retention
-failure. Leave it due rather than forcing it; it rotates back. The test is the one
-the new-term budget already uses: does this session's work touch the term's subject.
+failure. Leave it due rather than forcing it: after ${DORMANT_AFTER} sessions without
+use it moves to the back of the queue on its own. The test is the one the new-term
+budget already uses: does this session's work touch the term's subject.
 
 The bracket after a due term IS that subject — [rf, hardware], [family]. Read it
 and answer the test; don't re-derive the subject from the gloss when the line already
@@ -332,12 +417,13 @@ export function today(now = new Date()): string {
 
 /**
  * Write via temp file + rename, the same way `journal-append.ts` and
- * `affirm.ts` do. The ledger has concurrent writers in practice — another
+ * `affirm.ts` do. Used for the ledger and the hook's sidecar. The ledger has
+ * concurrent writers in practice — another
  * session appended six entries to it mid-review on 2026-09-08 — and a bare
  * `writeFileSync` can be observed truncated. This closes the truncation half;
  * the lost-update window is narrowed, not eliminated.
  */
-function writeLedger(path: string, text: string): void {
+function writeAtomic(path: string, text: string): void {
   const tmp = `${path}.tmp-${process.pid}`;
   try {
     writeFileSync(tmp, text, "utf8");
@@ -397,7 +483,7 @@ export function main(
     // Worded as the success it is: the state asked for is the state on disk.
     // "nothing to change" read to sessions as a failure.
     if (before === after) return out(`already current: ${JSON.stringify(needle)} -> ${arg}${n}`), 0;
-    writeLedger(cfg.ledger, after);
+    writeAtomic(cfg.ledger, after);
     return out(`${verb} ${JSON.stringify(needle)} -> ${arg}${n}`), 0;
   };
 
@@ -409,6 +495,11 @@ export function main(
   if (flag === "--add" || flag === "--correct") {
     const code = args[1];
     if (!code) return usage();
+    // The reader decides what the writer may write. Checked before config
+    // membership, because an empty `languages` skips that check entirely.
+    if (parseLedger(formatEntry(code, "-", "")).at(0)?.code !== code) {
+      return out(`language code ${JSON.stringify(code)} would not read back from the ledger — use a BCP 47 tag like pt or pt-BR`), 0;
+    }
     const codes = cfg.languages.map(l => l.code);
     if (codes.length && !codes.includes(code)) {
       return out(`unknown language ${JSON.stringify(code)} — configured: ${codes.join(", ")}`), 0;
@@ -478,7 +569,7 @@ export function main(
     }
     if (text !== before) {
       mkdirSync(dirname(cfg.ledger), { recursive: true });
-      writeLedger(cfg.ledger, text);
+      writeAtomic(cfg.ledger, text);
     }
     for (const l of added) out(`+ ${l}`);
     for (const b of skipped) out(`exists: ${b}`);
@@ -495,7 +586,7 @@ export function main(
   const n = flag === "--due" && args[1] ? Number.parseInt(args[1], 10) : cfg.due;
   if (!Number.isFinite(n)) return usage();
   const entries = parseLedger(text);
-  for (const e of stalest(entries, n)) {
+  for (const e of stalest(entries, n, loadSurfaced(cfg.surfaced))) {
     out(`${e.seen}  ${e.code}: ${e.term}${e.subject ? `  [${e.subject}]` : ""}`);
   }
   const hidden = entries.length - Math.min(n, entries.length);

@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { main, today, type Config } from "../lib/pastiche";
+import { dirname, join } from "node:path";
+import {
+  DORMANT_AFTER, main, parseLedger, recordSurfaced, stalest, today, type Config, type Surfaced,
+} from "../lib/pastiche";
 
 const NOW = today();
 
@@ -151,6 +153,49 @@ describe("default and --path", () => {
 
   test("--due with a non-numeric count is arg misuse", () => {
     expect(main(["--due", "lots"], fixture(SEED))).toBe(2);
+  });
+
+  // "the same selection the hook injects" has to include what the hook rotated out.
+  test("--due leaves out an item the hook rotated to the back", () => {
+    const c = fixture(SEED);
+    c.surfaced = join(dirname(c.ledger), "surfaced.json");
+    const entries = parseLedger(SEED);
+    const s = Array.from({ length: DORMANT_AFTER }, (_, i) => `s${i}`)
+      .reduce((acc, id) => recordSurfaced(acc, stalest(entries, 1, acc), id, NOW), {} as Surfaced);
+    writeFileSync(c.surfaced, JSON.stringify(s));
+    const out: string[] = [];
+    main(["--due", "1"], c, l => void out.push(l));
+    expect(out[0]).toContain("la red");
+    expect(out.join("\n")).not.toContain("teuk");
+  });
+});
+
+// 421: `--add` wrote whatever code config held, and the reader parsed only
+// `[a-z]{2}` — the pt-BR line landed on disk and nothing could see it.
+describe("language codes", () => {
+  test("a region-tagged code round-trips: --add writes it, --due and --seen read it", () => {
+    const c = fixture(SEED);
+    c.languages = [{ code: "pt-BR", name: "Portuguese", domains: "technical" }];
+    const out: string[] = [];
+    main(["--add", "pt-BR", "a rede — network"], c, l => void out.push(l));
+    expect(out).toContain("(3 entries)");
+    out.length = 0;
+    main(["--due", "9"], c, l => void out.push(l));
+    expect(out.join("\n")).toContain("pt-BR: a rede — network");
+    out.length = 0;
+    main(["--seen", "a rede"], c, l => void out.push(l));
+    expect(out[0]).toStartWith("already current");
+  });
+
+  test("a code the ledger cannot read back is refused, configured or not", () => {
+    for (const languages of [[], [{ code: "PT", name: "Portuguese", domains: "" }]]) {
+      const c = fixture(SEED);
+      c.languages = languages;
+      const out: string[] = [];
+      expect(main(["--add", "PT", "a rede — network"], c, l => void out.push(l))).toBe(0);
+      expect(out.join("\n")).toContain("PT");
+      expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+    }
   });
 });
 
