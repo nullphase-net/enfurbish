@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHECK_RESULTS, checkReport, collect, commitsSince, formatHeader, generation, main, ownership, ownershipSince, report, stamp, windowSince } from "../lib/handoffs";
@@ -211,6 +211,51 @@ test("--stamp then --check round-trips through the filesystem", () => {
   expect(out[0].split("\n")[0]).toBe("unstamped");
   expect(out[1]).toStartWith("stamped ");
   expect(out[2].split("\n")[0]).toBe("assistant");
+});
+
+// symbion 55a: `--stamp` certified content without moving the header above it, so a
+// mid-session reconcile that stamped (as 5.6 says to) read `+Nm after header` on the
+// next report — a false positive the reader then had to explain away. A normal wrap
+// could earn one too: --header renders before the body is composed.
+const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d+Z$/, "Z");
+
+function reconciled(wrappedMs: number): { root: string; path: string } {
+  const root = mkdtempSync(join(tmpdir(), "handoffs-"));
+  writeFileSync(join(root, "CLAUDE.md"), "# marker\n");
+  const path = join(root, "NEXT_SESSION.md");
+  const header = formatHeader({ slug: "proj", wrapped: iso(wrappedMs), session: "abc12345" });
+  writeFileSync(path, `${header}\n\n## Open threads\n- [ ] a thing\n`);
+  return { root, path };
+}
+
+test("--stamp moves the header to the stamp when it certifies new content", () => {
+  const now = Date.now();
+  const { root, path } = reconciled(now - 2 * 3600_000);
+  main(["--stamp", path], now, () => {});
+  const text = readFileSync(path, "utf8");
+  expect(text).toContain(`**Last wrapped:** ${iso(now)} (session abc12345)`);
+  expect(ownership(text)).toBe("assistant");
+  expect(report(collect(root, root), root, now)).not.toContain("after header");
+});
+
+// The other direction. Moving the header opens the next `--since` window later; doing
+// it for content nobody rewrote would hide commits the file was never reconciled against.
+test("--stamp leaves the header alone when the content has not moved since the last stamp", () => {
+  const t1 = Date.now() - 3600_000;
+  const { path } = reconciled(t1 - 60_000);
+  main(["--stamp", path], t1, () => {});
+  const once = readFileSync(path, "utf8");
+  main(["--stamp", path], t1 + 3000_000, () => {});
+  expect(readFileSync(path, "utf8")).toBe(once);
+  expect(once).toContain(`**Last wrapped:** ${iso(t1)}`);
+});
+
+test("--stamp on a file with no header stamps it and adds nothing else", () => {
+  const root = mkdtempSync(join(tmpdir(), "handoffs-"));
+  const path = join(root, "NEXT_SESSION.md");
+  writeFileSync(path, BODY);
+  main(["--stamp", path], Date.now(), () => {});
+  expect(readFileSync(path, "utf8")).toBe(stamp(BODY));
 });
 
 test("--check on a missing file exits 0 and says absent", () => {

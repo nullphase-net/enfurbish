@@ -34,7 +34,7 @@ Parse the JSON. `ok: false` → note `degraded: true, reason: "..."` and proceed
 
 - **Trailing stats.** Transcript writes are buffered. If `session_end` is more than ~60s behind wall-clock, say "stats trail by ~Ns" in the journal entry under the affected tool; otherwise the count silently undercounts.
 - **`skills_invoked`** includes slash commands the user typed, so built-ins (`/clear`, `/compact`, `/config`) appear beside real skills. Skip them; they are not user-modifiable tooling.
-- **`compaction_count > 0`** means this jsonl is a post-compaction segment and `turn_count` covers only turns since the last compaction. Say so in the retro: `Turns: N user / N model (since last of K compactions)`.
+- **`compaction_count`** is how many times the session compacted. A compaction does not truncate the jsonl, so `turn_count` covers the whole session either way; report it without a caveat.
 
 ### 2–4. Journal context, retro file, journal entry *(full only; in `full.md`)*
 
@@ -66,7 +66,7 @@ Pass `session_start` from step 1. Line one is the verdict; line two says what to
 
 **5.2 Judge per item what this session resolved.** For each item under Open threads / Start here / Read first / Don't forget:
 
-- The evidence is **`files_changed`** from the scan: what git says moved under the cwd since `session_start`, commits plus work still dirty and modified inside the window. `files_edited` comes from Edit/Write records only and is empty under auto mode, where every write is a heredoc; `files_edited_blind` marks that case. Never narrate "no files were edited" from either field.
+- The evidence is **`files_changed`** from the scan: what git says moved in this repo since `session_start` (paths from the repo root), commits plus work still dirty and modified inside the window. `files_edited` comes from Edit/Write records only, so it misses every heredoc and patch-script write; `files_edited_blind` marks it whenever it is empty or git saw a change it does not list. Never narrate "no files were edited" from either field.
 - Two limits on `files_changed`. It is git-derived, so an untracked *and* gitignored path never appears in it: a project that ignores its own `NEXT_SESSION.md` or scratch notes shows four rewrites as nothing. And it is repo-scoped, not session-scoped: a concurrent session, a subagent in another cwd, or the user in an editor all land in it, while a concurrent session on another branch lands in none of it. Corroborate against the retro or the transcript before writing "we changed"; otherwise write "changed during the session". Absence from the list is not evidence an item went untouched.
 - If the pointer is older than this session, the work that closed an item may belong to a session that never wrapped. Ask git rather than reading files:
 
@@ -110,7 +110,7 @@ Three authoring rules:
 
 **5.5** No file existed and no new items → do nothing.
 
-**5.6 Stamp last, write path only,** after every edit to the file is final. Re-stamping unchanged content is a no-op, so mid-session reconciles should stamp too.
+**5.6 Stamp last, write path only,** after every edit to the file is final. Re-stamping unchanged content is a no-op, so mid-session reconciles should stamp too. A stamp that changes moves the header's timestamp with it, so the next report does not read `+Nm after header` for your own reconcile.
 
 ```bash
 bun run "<skill-base-dir>/../../lib/handoffs.ts" --stamp "$(pwd)/NEXT_SESSION.md"

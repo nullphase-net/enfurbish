@@ -295,6 +295,58 @@ test("parseTranscript counts slash commands as turns and records them as skills"
   expect(r.skills_invoked.sort()).toEqual(["continuity:wrap", "ponytail"]);
 });
 
+// symbion c0b: session 7c452ae9's second wrap read 28 user turns against 13 typed
+// prompts + 11 slash commands. Parsed from its records: 3 `[Request interrupted by
+// user]` and 1 relayed agent message (`isMeta`). A survey of all 426 local transcripts
+// found 451 counted records flagged `isMeta` across 35 prefixes, every one synthetic:
+// relayed agent messages, /loop re-fires of a stored prompt, skill bodies and
+// re-invocations, image metadata, stop-hook feedback. One case per shape, because a
+// /loop re-fire is plain text and only the flag tells it from a prompt.
+function metaRec(content: unknown, flags: object) {
+  return JSON.stringify({ ...JSON.parse(userRec(content)), ...flags });
+}
+
+test("parseTranscript does not count records Claude Code synthesises, by flag or by shape", async () => {
+  const r = await parseTranscript(writeSession([
+    userRec("one real prompt"),
+    metaRec("Another Claude session sent a message:\n<agent-message from=\"a1\">done</agent-message>", { isMeta: true }),
+    metaRec("monitor things and ensure they are working as intended", { isMeta: true }),
+    metaRec("(Re-invocation of /affirm:affirm — the skill instructions were previously loaded)", { isMeta: true }),
+    userRec([{ type: "text", text: "[Request interrupted by user]" }]),
+    userRec([{ type: "text", text: "[Request interrupted by user for tool use]" }]),
+    metaRec("This session is being continued from a previous conversation that ran out of context.",
+      { isCompactSummary: true, isVisibleInTranscriptOnly: true }),
+  ]));
+  expect(r.turn_count.user).toBe(1);
+});
+
+// The other direction: prompts that open with a bracket or a tag are still prompts.
+test("parseTranscript still counts a prompt that opens with an image or a ! command", async () => {
+  const r = await parseTranscript(writeSession([
+    userRec([{ type: "text", text: "[Image #1] what is wrong with this chart?" }]),
+    userRec("<bash-input>git status</bash-input>"),
+  ]));
+  expect(r.turn_count.user).toBe(2);
+});
+
+// symbion d77 filed "a compaction during the wrap suppresses the turn-count caveat".
+// The caveat's premise was wrong: a compaction does not truncate the jsonl. Both
+// compacted transcripts on this machine (Claude Code 2.1.268 and 2.1.274) keep every
+// pre-compaction record in the same file — umbel eecf8708: 12 user turns before
+// its boundary, 3 after — so the count covers the whole session either way.
+test("parseTranscript counts turns on both sides of a compaction", async () => {
+  const r = await parseTranscript(writeSession([
+    userRec("before the compaction"),
+    JSON.stringify({ type: "system", subtype: "compact_boundary", timestamp: "2026-08-18T00:30:00.000Z",
+      sessionId: "77777777-0000-0000-0000-000000000000", content: "Conversation compacted" }),
+    metaRec("This session is being continued from a previous conversation that ran out of context.",
+      { isCompactSummary: true, isVisibleInTranscriptOnly: true }),
+    userRec("after the compaction"),
+  ]));
+  expect(r.compaction_count).toBe(1);
+  expect(r.turn_count.user).toBe(2);
+});
+
 test("parseTranscript still credits tool errors back from tool_result records", async () => {
   const r = await parseTranscript(writeSession([
     JSON.stringify({
@@ -342,6 +394,44 @@ test("files_edited_blind is absent when the field is informative", async () => {
   });
   const r = await parseTranscript(writeSession([userRec("do it"), edit]));
   expect(r.files_edited).toEqual(["/repo/a.ts"]);
+  expect(r.files_edited_blind).toBeUndefined();
+});
+
+// symbion 092: one Edit beside a heredoc write gave a populated files_edited that read
+// as the full list; `blind` only fired when the list was empty. `repoAt` returns the
+// un-normalized tmpdir path (/var/…) while git reports /private/var/…, so these also
+// cover a files_edited path spelled through a symlink.
+function mixedSession(root: string, edited: string[]): string {
+  const rec = (extra: object) => JSON.stringify({
+    cwd: root, timestamp: "2026-08-18T18:30:00-05:00",
+    sessionId: "77777777-0000-0000-0000-000000000000", ...extra,
+  });
+  return writeSession([
+    rec({ type: "user", message: { role: "user", content: "go" } }),
+    ...edited.map((file_path, i) => rec({ type: "assistant",
+      message: { role: "assistant", content: [{ type: "tool_use", id: `e${i}`, name: "Write", input: { file_path } }] } })),
+    rec({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "b1", name: "Bash", input: {} }] } }),
+  ]);
+}
+
+test("files_edited_blind flags a populated files_edited that git shows is incomplete", async () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, "via-edit.txt"), "x");
+  writeFileSync(join(root, "via-heredoc.txt"), "y");
+  const r = await parseTranscript(mixedSession(root, [join(root, "via-edit.txt")]));
+  expect(r.files_edited).toHaveLength(1);
+  expect(r.files_edited_blind).toBe(true);
+});
+
+test("files_edited_blind stays absent when files_edited covers everything git saw", async () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, "a.txt"), "x");
+  // A Write into a new directory: git collapses it to `newdir/`, which a.txt's
+  // sibling in files_edited covers.
+  mkdirSync(join(root, "newdir"));
+  writeFileSync(join(root, "newdir", "b.txt"), "y");
+  const r = await parseTranscript(mixedSession(root, [join(root, "a.txt"), join(root, "newdir", "b.txt")]));
+  expect(r.files_changed).toEqual(["a.txt", "newdir/"]);
   expect(r.files_edited_blind).toBeUndefined();
 });
 
@@ -430,6 +520,42 @@ test("gitChangedSince does not report the cwd's own NEXT_SESSION.md as session w
   writeFileSync(join(root, "sub", "NEXT_SESSION.md"), "# Next session — sub\n");
   const got = gitChangedSince(root, "2026-08-18T19:00:00-05:00");
   expect(got).toEqual(["real.txt", "sub/NEXT_SESSION.md"]);
+});
+
+// Every test above runs from the repo root. Git prints paths relative to the ROOT, and
+// the filter stat'd them against the cwd, so from a subdirectory every stat missed and
+// every dirty file was kept as a "deletion". The pointer exclusion keyed on a root
+// path the same way, dropping another cwd's pointer and keeping this one's.
+function repoWithSub(): string {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  mkdirSync(join(root, "sub"));
+  writeFileSync(join(root, "sub", "tracked.txt"), "x");
+  spawnSync("git", ["add", "-A"], { cwd: root });
+  spawnSync("git", ["commit", "-q", "-m", "sub"], {
+    cwd: root,
+    env: { ...process.env, GIT_COMMITTER_DATE: "2026-08-18T18:30:00-05:00", GIT_AUTHOR_DATE: "2026-08-18T18:30:00-05:00" },
+  });
+  return root;
+}
+
+test("gitChangedSince from a subdirectory still excludes dirty files that predate the window", () => {
+  const root = repoWithSub();
+  const stale = join(root, "left-over.txt");
+  writeFileSync(stale, "from a prior session");
+  const old = new Date("2026-08-18T12:00:00-05:00");
+  utimesSync(stale, old, old);
+  writeFileSync(join(root, "sub", "fresh.txt"), "now");
+  const got = gitChangedSince(join(root, "sub"), "2026-08-18T19:00:00-05:00")!;
+  expect(got).toContain("sub/fresh.txt");
+  expect(got).not.toContain("left-over.txt");
+});
+
+test("gitChangedSince from a subdirectory drops its own pointer and keeps the root's", () => {
+  const root = repoWithSub();
+  writeFileSync(join(root, "NEXT_SESSION.md"), "# Next session — root\n");
+  writeFileSync(join(root, "sub", "NEXT_SESSION.md"), "# Next session — sub\n");
+  const got = gitChangedSince(join(root, "sub"), "2026-08-18T19:00:00-05:00");
+  expect(got).toEqual(["NEXT_SESSION.md"]);
 });
 
 test("gitChangedSince returns null when git cannot answer, which is not []", () => {

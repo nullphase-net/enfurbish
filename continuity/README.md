@@ -33,13 +33,15 @@ bun run lib/handoffs.ts --since ./NEXT_SESSION.md   # what landed after its head
 
 ```
 2 handoffs · root /Volumes/chonk/projects/zerotrace · local is 1d 10h staler than newest · newest 7 commits behind
-* sub/NEXT_SESSION.md      8h 39m ago wrapped 2026-08-18T09:00:00-05:00  stamp:assistant  +1h 54m after header  +7 commits
+* sub/NEXT_SESSION.md      8h 39m ago wrapped 2026-08-18T09:00:00-05:00  stamp:edited  +1h 54m after header  +7 commits
   NEXT_SESSION.md [local]  1d 18h ago wrapped 2026-08-16T22:45:00-05:00  oversize:21KB
 ```
 
 The header line is the load-bearing one: reading only the cwd-local pointer is wrong exactly
 when it isn't the newest. A trailing `+Nh after header` on a row means the file was edited
-after its own `**Last wrapped:**` was written — mid-session reconciles the header doesn't describe.
+after its own `**Last wrapped:**` was written — by hand, or by a reconcile that never stamped.
+`--stamp` moves the header's timestamp whenever it certifies new content, so a stamped reconcile
+does not show it.
 A trailing `+N commits` means the repo moved on after the pointer was written, and the header
 repeats the count for the newest one. Age measures the file; that measures the code it describes,
 and the two come apart exactly when a handoff is most misleading.
@@ -122,10 +124,10 @@ Entries are written the same way — `/wrap` hands `journal-append.ts` JSON and 
 The retro and journal entry are informed by `scan.ts`, which parses the current session's transcript at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`. It reports:
 
 - Session start/end timestamps and duration
-- User turn count vs model turn count (post-compaction only when `compaction_count > 0` — see below). A user turn is a typed prompt, a slash command, or a pasted attachment; the records Claude Code synthesizes into the user role (`<task-notification>`, `<local-command-stdout>`, `<system-reminder>`, tool results) are excluded.
+- User turn count vs model turn count. A user turn is a typed prompt, a slash command, or a pasted attachment; the records Claude Code synthesizes into the user role are excluded — the tag-wrapped ones (`<task-notification>`, `<local-command-stdout>`, `<system-reminder>`), tool results, `[Request interrupted by user]`, and anything flagged `isMeta` (relayed agent messages, `/loop` re-fires, skill bodies) or `isCompactSummary`.
 - Per-tool call counts and error counts, bucketed into `tools` (built-ins) vs `mcp` (`mcp__*` calls)
 - Hooks that fired during the session and how many times
-- `compaction_count` — number of `compact_boundary` events. Non-zero means turn counts are partial (everything before the last compaction is not in this transcript segment).
+- `compaction_count` — number of `compact_boundary` events. A compaction does not truncate the transcript, so the counts above still cover the whole session.
 - Skills invoked — both `Skill` tool calls and slash commands typed by the user, so built-in commands (`/clear`, `/compact`) appear here too
 - Files edited (most-recent first, capped at 50)
 - Number of files read

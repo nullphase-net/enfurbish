@@ -5,7 +5,8 @@ The evidence behind the rules in `SKILL.md` and `full.md`, grouped by step. Noth
 ## Step 1: scan.ts
 
 - **Counts are diagnosed from the records, never from the last wrap's prior.** The sign of the user-turn error has flipped once already: a 5× undercount for six consecutive wraps, then an overcount once that was fixed, because a loaded SKILL.md enters the transcript as a user record beside the slash command that loaded it, so one action counted twice.
-- **Compaction.** The jsonl on disk after a compaction is the post-compaction segment. Counts read at face value across one misdescribe the session, and a future reader cannot tell.
+- **Compaction does not truncate the transcript.** This rule once said it did, and every compacted session's retro carried `(since last of K compactions)` on a count that already covered the whole session. Measured 2026-09-24 on both compacted transcripts on this machine (Claude Code 2.1.268, 2.1.274): 12 and 1 user turns before the boundary, in the same file. The summary a compaction injects is a user record flagged `isCompactSummary`, and it no longer counts as a turn.
+- **`files_edited_blind` covers a partial list, not only an empty one.** One Edit beside heredoc writes listed 5 of 7 changed paths and read as complete.
 
 ## Step 2: journal context
 

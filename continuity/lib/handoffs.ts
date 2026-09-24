@@ -199,6 +199,29 @@ export function checkReport(result: CheckResult): string {
 // --- reporting -------------------------------------------------------------
 
 const LAST_WRAPPED = /^\*\*Last wrapped:\*\*\s*(\S+)/m;
+const LAST_WRAPPED_AT = /^(\*\*Last wrapped:\*\*\s*)\S+/m;
+
+/** The clock, as a header writes it. UTC: assembling a local offset is how one went 5h fast. */
+function clockIso(now: number): string {
+  return new Date(now).toISOString().replace(/\.\d+Z$/, "Z");
+}
+
+/**
+ * What `--stamp` writes. When the stamp has to change — the content moved since the
+ * last one, or never had one — the header's timestamp moves to `wrapped` with it:
+ * the stamp certifies the content as of now, and a header left behind made every
+ * mid-session reconcile read `+Nm after header` on the next report (symbion 55a).
+ * Content the stamp already matches is left byte-for-byte alone, header included:
+ * moving the header opens the next `--since` window later, and doing that for a
+ * file nobody rewrote would hide commits it was never reconciled against.
+ *
+ * Only the timestamp moves. The `(session …)` beside it still names the wrap that
+ * wrote the header.
+ */
+export function restampFile(text: string, wrapped: string): string {
+  if (stamp(text) === text) return text;
+  return stamp(text.replace(LAST_WRAPPED_AT, `$1${wrapped}`));
+}
 
 /**
  * Render the header block. The single place that shape is written — `LAST_WRAPPED`
@@ -415,7 +438,8 @@ export function windowSince(root: string, path: string, limit = 25): string {
 }
 
 const USAGE = `usage: handoffs.ts [--cwd <dir>]        list NEXT_SESSION.md files under the project root
-       --stamp <path>              rewrite <path> with a current wrap-generation stamp
+       --stamp <path>              rewrite <path> with a current wrap-generation stamp;
+                                   when the content moved, its header's timestamp too
        --check <path> [since]      assistant | edited | unstamped, with what to do
                                    about it on the next line; with an ISO <since>
                                    (the session_start), edited and unstamped each
@@ -439,8 +463,7 @@ export function main(
     // `--since` under-reported off it until a human noticed. The clock is
     // deterministic, so the clock supplies it. UTC because assembling a local offset
     // is the same arithmetic that produced the bug.
-    const wrapped = new Date(now).toISOString().replace(/\.\d+Z$/, "Z");
-    return emit(formatHeader({ slug, wrapped, session, retro })), 0;
+    return emit(formatHeader({ slug, wrapped: clockIso(now), session, retro })), 0;
   }
 
   if (flag === "--since") {
@@ -464,9 +487,12 @@ export function main(
       const since = args[2];
       return emit(checkReport(since ? ownershipSince(text, statSync(path).mtimeMs, since) : ownership(text))), 0;
     }
-    const next = stamp(text);
-    if (next !== text) writeFileSync(path, next);
-    return emit(`stamped ${generation(text)} ${path}`), 0;
+    const next = restampFile(text, clockIso(now));
+    if (next === text) return emit(`stamped ${generation(text)} ${path}`), 0;
+    writeFileSync(path, next);
+    const moved = LAST_WRAPPED.exec(next)?.[1];
+    const header = moved && moved !== LAST_WRAPPED.exec(text)?.[1] ? ` · header ${moved}` : "";
+    return emit(`stamped ${generation(next)} ${path}${header}`), 0;
   }
 
   if (flag && flag !== "--cwd") return process.stderr.write(`${USAGE}\n`), 2;

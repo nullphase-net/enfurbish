@@ -1,6 +1,6 @@
 import { readdirSync, statSync, existsSync, createReadStream, realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 
@@ -10,6 +10,12 @@ export function encodeCwd(cwd: string): string {
 
 function safeRealpath(p: string): string {
   try { return realpathSync(p); } catch { return p; }
+}
+
+/** `safeRealpath`, but a path that no longer exists still gets its directory resolved. */
+function canonical(p: string): string {
+  try { return realpathSync(p); } catch { /* deleted: resolve what is left */ }
+  try { return join(realpathSync(dirname(p)), basename(p)); } catch { return p; }
 }
 
 type FindArgs = { cwd: string; projectsRoot?: string };
@@ -92,24 +98,29 @@ export type ScanOk = {
   mcp: Record<string, { calls: number; errors: number }>;
   hooks: Record<string, { fired: number }>;
   /**
-   * Number of `system.compact_boundary` events in this transcript segment.
-   * Non-zero means turn_count is undercount: the recorded jsonl is the
-   * post-compaction segment and pre-compaction turns are not present.
+   * Number of `system.compact_boundary` events in the transcript. A fact about the
+   * session, not a caveat on the counts: a compaction does not truncate the jsonl,
+   * so every count here covers the whole session either side of one. Both compacted
+   * transcripts on this machine keep their pre-compaction records (Claude Code
+   * 2.1.268, 2.1.274; umbel eecf8708: 12 user turns before its boundary, 3 after).
+   * A scan taken before a late compaction under-reports only this number.
    */
   compaction_count: number;
   skills_invoked: string[];
   files_edited: string[];
   /**
-   * Present only when `files_edited` is uninformative: it is empty and the session
-   * used Bash, so a write via `sed`/heredoc/`cp` would leave no trace here. It does
-   * not mean edits happened — it means the transcript cannot tell you either way,
-   * which is a different claim from the empty list on its own. Auto mode routes
-   * every write through Bash, so this is the normal state there, not an anomaly.
+   * Present when `files_edited` is not the whole story. Either it is empty and the
+   * session used Bash, so a write via `sed`/heredoc/`cp` would leave no trace here,
+   * or git reports a change it does not list. Auto mode routes every write through
+   * Bash, so this is the normal state there, not an anomaly. The second case is the
+   * dangerous one: a populated list read as complete (symbion 092, 5 of 7 changed
+   * paths listed). Absent means git saw nothing the list lacks.
    */
   files_edited_blind?: true;
   /**
-   * Files git says changed since `session_start`, under `cwd`: commits in the window
-   * plus everything still dirty or untracked in the working tree. Present whenever
+   * Files git says changed since `session_start`, in the repo holding `cwd`, relative
+   * to that repo's root: commits in the window plus everything still dirty or
+   * untracked in the working tree. Present whenever
    * Bash ran, because that is when `files_edited` stops being the whole story --- not
    * only when it is empty. Absent (rather than empty) when git could not answer: no
    * repo, no git, unparseable start timestamp. Empty means git looked and found none.
@@ -167,6 +178,11 @@ export function gitChangedSince(cwd: string, iso: string): string[] | null {
 
   const log = git("log", "--name-only", "--pretty=format:", `--since=${iso}`);
   if (log.status !== 0) return null;
+  // Both lists below are relative to the repo ROOT whatever `-C` says, and the cwd can
+  // be a subdirectory of it. Joined to the cwd instead, every stat from a subdirectory
+  // missed and every dirty file was kept as a "deletion".
+  const loc = repoLocation(cwd);
+  if (!loc) return null;
 
   // `--porcelain` is stable across git versions by contract; `-z` avoids the quoting
   // it applies to paths with spaces. XY status is the first two bytes, path the rest.
@@ -186,15 +202,36 @@ export function gitChangedSince(cwd: string, iso: string): string[] | null {
       if (!rec) continue;
       const rel = /^[ MADRCU?!]{2} /.test(rec) ? rec.slice(3) : rec;
       let m: number;
-      try { m = statSync(join(cwd, rel)).mtimeMs; } catch { seen.add(rel); continue; }
+      try { m = statSync(join(loc.top, rel)).mtimeMs; } catch { seen.add(rel); continue; }
       if (m > cutoff) seen.add(rel);
     }
   }
   // The wrap writes this cwd's pointer inside the session window, so it always
-  // qualified and reported the scan's own artifact as session work. A pointer in a
-  // subdirectory belongs to another cwd's wrap and stays.
-  seen.delete("NEXT_SESSION.md");
+  // qualified and reported the scan's own artifact as session work. A pointer in any
+  // other directory belongs to another cwd's wrap and stays.
+  seen.delete(`${loc.prefix}NEXT_SESSION.md`);
   return [...seen].sort();
+}
+
+/** The repo root holding `cwd`, and `cwd`'s path under it (`sub/`, or `` at the root). */
+function repoLocation(cwd: string): { top: string; prefix: string } | null {
+  const r = spawnSync("git", ["-C", cwd, "rev-parse", "--show-toplevel", "--show-prefix"], { encoding: "utf8" });
+  if (r.status !== 0) return null;
+  const [top, prefix = ""] = r.stdout.split("\n");
+  return top ? { top, prefix } : null;
+}
+
+/**
+ * Does git report a change `edited` does not list? Compared canonically, because an
+ * Edit's `file_path` can be spelled through a symlink git never uses.
+ */
+function editsMiss(changed: string[], edited: string[], top: string): boolean {
+  const have = edited.map(canonical);
+  return changed.some(rel => {
+    const abs = canonical(join(top, rel));
+    // git collapses an untracked directory to `dir/`; any edit inside it covers it.
+    return rel.endsWith("/") ? !have.some(e => e.startsWith(`${abs}/`)) : !have.includes(abs);
+  });
 }
 
 /**
@@ -212,7 +249,22 @@ export function gitChangedSince(cwd: string, iso: string): string[] | null {
  * background-task notifications the wrap blamed, which this pattern already caught.
  * The sign of this field's error is not stable; check the records, not the prior.
  */
-const SYNTHETIC_USER = /^\s*(<(task-notification|local-command-caveat|local-command-stdout|bash-stdout|system-reminder|thinking)>|Base directory for this skill:)/;
+const SYNTHETIC_USER = /^\s*(<(task-notification|local-command-caveat|local-command-stdout|bash-stdout|system-reminder|thinking)>|Base directory for this skill:|\[Request interrupted by user)/;
+
+/**
+ * Flags Claude Code sets on user-role records it wrote itself. Gated on the flag, not
+ * the text: a /loop re-fire is the stored prompt verbatim, and only `isMeta` tells it
+ * from the human typing it again. Session 7c452ae9 read 28 user turns against 24
+ * (13 typed + 11 slash commands); the excess was three `[Request interrupted by
+ * user]` and one relayed agent message. Surveyed 2026-09-24 over all 426 local
+ * transcripts: 451 counted records carried `isMeta`, across 35 prefixes, every one
+ * synthetic (agent relays, /loop re-fires, skill bodies and re-invocations, image
+ * metadata, stop-hook feedback); `isCompactSummary` marks the summary a compaction
+ * injects, one per compaction.
+ */
+function isSynthetic(obj: any, text: string): boolean {
+  return obj.isMeta === true || obj.isCompactSummary === true || SYNTHETIC_USER.test(text);
+}
 
 /** `<command-name>/continuity:wrap</command-name>` — how a slash command reaches the transcript. */
 const COMMAND_NAME = /<command-name>\/?([^<]+)<\/command-name>/;
@@ -287,7 +339,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
 
     if (obj.type === "user" && obj.message?.role === "user") {
       const text = userText(obj.message.content);
-      if (text.trim() && !SYNTHETIC_USER.test(text)) userTurns++;
+      if (text.trim() && !isSynthetic(obj, text)) userTurns++;
       const cmd = COMMAND_NAME.exec(text);
       if (cmd) skillsSet.add(cmd[1].trim());
 
@@ -356,7 +408,12 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
 
   // Whenever Bash ran, not only when files_edited came back empty: one Edit call
   // beside twenty heredoc writes yields a non-empty list that is still not the story.
-  const gitChanged = (tools.Bash?.calls ?? 0) > 0 ? gitChangedSince(cwd, firstTs!) : null;
+  const bash = (tools.Bash?.calls ?? 0) > 0;
+  const gitChanged = bash ? gitChangedSince(cwd, firstTs!) : null;
+  const top = gitChanged?.length ? repoLocation(cwd)?.top : undefined;
+  // Against every edit, not the capped list: a 51st edit is still an edit.
+  const blind = bash && (files_edited.length === 0
+    || (top !== undefined && editsMiss(gitChanged!, [...editsByFile.keys()], top)));
 
   return {
     ok: true,
@@ -375,7 +432,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
     compaction_count: compactionCount,
     skills_invoked: [...skillsSet],
     files_edited,
-    ...(files_edited.length === 0 && (tools.Bash?.calls ?? 0) > 0 ? { files_edited_blind: true } : {}),
+    ...(blind ? { files_edited_blind: true } : {}),
     ...(gitChanged ? { files_changed: gitChanged.slice(0, FILES_CHANGED_CAP) } : {}),
     ...(gitChanged && gitChanged.length > FILES_CHANGED_CAP
       ? { files_changed_hidden: gitChanged.length - FILES_CHANGED_CAP }
