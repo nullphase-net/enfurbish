@@ -19,6 +19,8 @@ export type Classification = {
   approved: string[];
   added: string[];
   changed: string[];
+  /** Could not be hashed. Reported, never dropped: a missing line reads as all-clear. */
+  unreadable: string[];
 };
 
 export function sha256OfFile(path: string): string {
@@ -55,11 +57,13 @@ export function classify(files: string[], stored: Record<string, string>): Class
   const approved: string[] = [];
   const added: string[] = [];
   const changed: string[] = [];
+  const unreadable: string[] = [];
   for (const f of files) {
     let cur: string;
     try {
       cur = sha256OfFile(f);
     } catch {
+      unreadable.push(f);
       continue;
     }
     const prev = stored[f];
@@ -67,18 +71,32 @@ export function classify(files: string[], stored: Record<string, string>): Class
     else if (prev !== cur) changed.push(f);
     else approved.push(f);
   }
-  return { approved, added, changed };
+  return { approved, added, changed, unreadable };
 }
 
-export function approveAll(projectDir: string, hashPath: string = HASH_FILE): { approved: Array<{ path: string; hash: string }> } {
+/**
+ * Per file, like `classify`: one unreadable file used to throw before the store was
+ * written, so every readable file beside it went unaffirmed too (symbion b6e).
+ */
+export function approveAll(
+  projectDir: string,
+  hashPath: string = HASH_FILE,
+): { approved: Array<{ path: string; hash: string }>; unreadable: string[] } {
   const files = collectInstructionFiles(projectDir);
   const stored = loadHashes(hashPath);
   const approved: Array<{ path: string; hash: string }> = [];
+  const unreadable: string[] = [];
   for (const f of files) {
-    const h = sha256OfFile(f);
+    let h: string;
+    try {
+      h = sha256OfFile(f);
+    } catch {
+      unreadable.push(f);
+      continue;
+    }
     stored[f] = h;
     approved.push({ path: f, hash: h });
   }
   saveHashes(stored, hashPath);
-  return { approved };
+  return { approved, unreadable };
 }

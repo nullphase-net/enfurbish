@@ -82,7 +82,15 @@ export function displayPath(projectDir: string, abs: string): string {
   return abs;
 }
 
-function walkRules(dir: string, out: string[]) {
+// Follows symlinks, files and directories both, because Claude Code's loader does:
+// ".claude/rules/ supports symlinks" (memory docs, with a symlinked shared-rules
+// directory as the example). Skipping them left that shape loading unwatched
+// (symbion e36). `seen` holds the real path of every directory walked, so a link
+// back up the tree ends the walk instead of recursing forever.
+function walkRules(dir: string, out: string[], seen = new Set<string>()) {
+  const real = realOrSelf(dir);
+  if (seen.has(real)) return;
+  seen.add(real);
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -90,10 +98,11 @@ function walkRules(dir: string, out: string[]) {
     return;
   }
   for (const e of entries) {
-    if (e.isSymbolicLink()) continue;
     const full = join(dir, e.name);
-    if (e.isDirectory()) walkRules(full, out);
-    else if (e.isFile()) out.push(full);
+    // A dirent describes the link itself; stat follows it. A dangling link is neither.
+    const link = e.isSymbolicLink();
+    if (link ? safeIsDir(full) : e.isDirectory()) walkRules(full, out, seen);
+    else if (link ? safeIsFile(full) : e.isFile()) out.push(full);
   }
 }
 

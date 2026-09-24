@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync, mkdirSync, utimesSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../lib/cli";
@@ -245,4 +246,94 @@ test("bare affirm labels a global file scope: global", () => {
   const out = io.out.join("\n");
   expect(out).toContain("scope:    global");
   expect(out).not.toContain("scope:    out-of-tree");
+});
+
+// --- unreadable files ------------------------------------------------------------
+
+function projectWithLockedRule() {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "rules");
+  mkdirSync(join(dir, ".claude", "rules"), { recursive: true });
+  const locked = join(dir, ".claude", "rules", "locked.md");
+  writeFileSync(locked, "secret");
+  chmodSync(locked, 0o000);
+  return { dir, hashPath, locked };
+}
+
+test("-a affirms the readable files and names the one it could not read", () => {
+  const { dir, hashPath } = projectWithLockedRule();
+  const io = collect();
+  expect(runCli(["-a"], opts(dir, hashPath, io))).toBe(0);
+  const out = io.out.join("\n");
+  expect(out).toContain("Affirmed 1 file");
+  expect(out).toContain(".claude/rules/locked.md  (unreadable — not affirmed)");
+});
+
+// symbion e63, second half: the NEW check returned first, so `unreadable` was
+// unreachable for any file not already in the store.
+test("bare invocation says unreadable for a file that was never affirmed", () => {
+  const { dir, hashPath } = projectWithLockedRule();
+  const io = collect();
+  runCli([], opts(dir, hashPath, io));
+  const out = io.out.join("\n");
+  expect(out).toMatch(/locked\.md\n\s+status:\s+unreadable/);
+  expect(out).toMatch(/CLAUDE\.md\n\s+status:\s+NEW/);
+});
+
+// --- --since: say why there are no commits, when git cannot see the file ----------
+
+function gitInit(dir: string) {
+  for (const args of [
+    ["init", "-q", "-b", "main"],
+    ["config", "user.email", "test@example.com"],
+    ["config", "user.name", "Test User"],
+    ["config", "commit.gpgsign", "false"],
+  ]) spawnSync("git", args, { cwd: dir });
+}
+
+function sinceLine(dir: string, hashPath: string): string {
+  const io = collect();
+  runCli(["--since", "2020-01-01T00:00:00Z"], opts(dir, hashPath, io));
+  return io.out.find((l) => l.includes("CLAUDE.md")) ?? "";
+}
+
+// symbion 233: this repo's own CLAUDE.md is gitignored, and "no commits in window"
+// read as reassurance about a file git can never report on.
+test("--since says a gitignored file is invisible to git, not that it has no commits", () => {
+  const { dir, hashPath } = projectWithClaudeMd("# rules\n");
+  gitInit(dir);
+  writeFileSync(join(dir, ".gitignore"), "CLAUDE.md\n");
+  const line = sinceLine(dir, hashPath);
+  expect(line).toContain("untracked (gitignored)");
+  expect(line).not.toContain("no commits in window");
+});
+
+test("--since says an untracked file is invisible to git", () => {
+  const { dir, hashPath } = projectWithClaudeMd("# rules\n");
+  gitInit(dir);
+  const line = sinceLine(dir, hashPath);
+  expect(line).toContain("untracked");
+  expect(line).not.toContain("gitignored");
+  expect(line).not.toContain("no commits in window");
+});
+
+test("--since says a file outside any repo is outside any repo", () => {
+  const { dir, hashPath } = projectWithClaudeMd("# rules\n");
+  const line = sinceLine(dir, hashPath);
+  expect(line).toContain("not in a git repo");
+  expect(line).not.toContain("no commits in window");
+});
+
+// The other direction: for a tracked file the old words were true, and stay.
+test("--since keeps 'no commits in window' for a tracked file committed before it", () => {
+  const { dir, hashPath } = projectWithClaudeMd("# rules\n");
+  gitInit(dir);
+  spawnSync("git", ["add", "CLAUDE.md"], { cwd: dir });
+  const old = "2019-06-01T00:00:00Z";
+  spawnSync("git", ["commit", "-q", "-m", "old"], {
+    cwd: dir,
+    env: { ...process.env, GIT_AUTHOR_DATE: old, GIT_COMMITTER_DATE: old },
+  });
+  utimesSync(join(dir, "CLAUDE.md"), new Date(), new Date()); // touched inside the window
+  expect(sinceLine(dir, hashPath)).toContain("no commits in window");
 });

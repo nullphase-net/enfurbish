@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -58,15 +58,52 @@ test("collectInstructionFiles recursively walks .claude/rules/", () => {
   ]);
 });
 
-test("collectInstructionFiles skips symlinks under .claude/rules/", () => {
+// symbion e36. Claude Code loads symlinks under .claude/rules/ — files and directories
+// both, per its memory docs ("The .claude/rules/ directory supports symlinks"), with
+// `ln -s ~/shared-claude-rules .claude/rules/shared` as the example. Skipping them
+// left exactly that shape unwatched while it loaded. Hashed at the real path, which
+// is where the content lives and what the banner then shows.
+test("collectInstructionFiles follows a symlinked directory under .claude/rules/", () => {
   const { dir } = mkProject();
-  const other = mkdtempSync(join(tmpdir(), "affirm-other-"));
+  const other = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-other-")));
   writeFileSync(join(other, "evil.md"), "via-symlink");
   mkdirSync(join(dir, ".claude", "rules"), { recursive: true });
   symlinkSync(other, join(dir, ".claude", "rules", "linked"));
   writeFileSync(join(dir, ".claude", "rules", "real.md"), "real");
   const files = collectInstructionFiles(dir);
-  expect(files).toEqual([join(dir, ".claude", "rules", "real.md")]);
+  expect(files).toEqual([join(dir, ".claude", "rules", "real.md"), join(other, "evil.md")].sort());
+});
+
+test("collectInstructionFiles follows a symlinked file under .claude/rules/", () => {
+  const { dir } = mkProject();
+  const other = normalizeProjectDir(mkdtempSync(join(tmpdir(), "affirm-other-")));
+  writeFileSync(join(other, "sneaky.md"), "via-symlink");
+  mkdirSync(join(dir, ".claude", "rules"), { recursive: true });
+  symlinkSync(join(other, "sneaky.md"), join(dir, ".claude", "rules", "sneaky.md"));
+  expect(collectInstructionFiles(dir)).toEqual([join(other, "sneaky.md")]);
+});
+
+// Two links back up, not one. With one, a walk that has no cycle guard still ends:
+// the OS refuses a path past 32 symlink hops (ELOOP) and the graph dedupes by real
+// path, so the output is identical. With two it branches at every level — 2^32
+// walks — so a missing guard hangs this test instead of passing it.
+test("a symlink cycle under .claude/rules/ terminates", () => {
+  const { dir } = mkProject();
+  const rules = join(dir, ".claude", "rules");
+  mkdirSync(join(rules, "sub"), { recursive: true });
+  writeFileSync(join(rules, "sub", "a.md"), "a");
+  symlinkSync(rules, join(rules, "sub", "up")); // sub/up -> rules, which holds sub
+  symlinkSync(rules, join(rules, "sub", "up2"));
+  expect(collectInstructionFiles(dir)).toEqual([join(rules, "sub", "a.md")]);
+});
+
+test("a dangling symlink under .claude/rules/ is skipped, no throw", () => {
+  const { dir } = mkProject();
+  const rules = join(dir, ".claude", "rules");
+  mkdirSync(rules, { recursive: true });
+  symlinkSync(join(dir, "nowhere.md"), join(rules, "gone.md"));
+  writeFileSync(join(rules, "real.md"), "real");
+  expect(collectInstructionFiles(dir)).toEqual([join(rules, "real.md")]);
 });
 
 test("collectInstructionFiles follows @imports in CLAUDE.md", () => {
@@ -141,3 +178,35 @@ test("approveAll preserves entries for other projects", () => {
   expect(loadHashes(hashPath)["/other/proj/CLAUDE.md"]).toBe("deadbeef");
 });
 
+// --- unreadable files: reported, never dropped, never fatal ----------------------
+
+/** A project with a readable CLAUDE.md and a rule nobody can read (chmod 000). */
+function projectWithLockedRule() {
+  const p = mkProject();
+  writeFileSync(join(p.dir, "CLAUDE.md"), "rules");
+  mkdirSync(join(p.dir, ".claude", "rules"), { recursive: true });
+  const locked = join(p.dir, ".claude", "rules", "locked.md");
+  writeFileSync(locked, "secret");
+  chmodSync(locked, 0o000);
+  return { ...p, locked };
+}
+
+// symbion b6e: `-a` threw EACCES on the locked rule and never wrote the store, so the
+// readable CLAUDE.md went unaffirmed too.
+test("approveAll affirms what it can read and reports what it cannot", () => {
+  const { dir, hashPath, locked } = projectWithLockedRule();
+  const { approved, unreadable } = approveAll(dir, hashPath);
+  expect(approved.map((a) => a.path)).toEqual([join(dir, "CLAUDE.md")]);
+  expect(unreadable).toEqual([locked]);
+  const stored = loadHashes(hashPath);
+  expect(stored[join(dir, "CLAUDE.md")]).toBeString();
+  expect(stored[locked]).toBeUndefined();
+});
+
+// symbion e63: classify skipped the file and nothing downstream ever mentioned it.
+test("classify reports an unreadable file instead of dropping it", () => {
+  const { dir, locked } = projectWithLockedRule();
+  const c = classify(collectInstructionFiles(dir), {});
+  expect(c.added).toEqual([join(dir, "CLAUDE.md")]);
+  expect(c.unreadable).toEqual([locked]);
+});

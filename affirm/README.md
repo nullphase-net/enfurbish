@@ -34,6 +34,7 @@ Affirm: instruction files in scope:
 | `✓` | Hash matches the affirmed value — trusted. |
 | `✦` | No record of this file — never affirmed. |
 | `✧` | Hash differs from the affirmed value — content changed. |
+| `?` | Could not be read, so could not be hashed. Listed rather than dropped; `/affirm -a` affirms everything readable beside it and names it. |
 
 `← @from <file>` marks a file pulled in by another's `@import`; `(global)` marks one loaded from `~/.claude/` in every project; `(out-of-tree)` marks one that lives outside the project. New/changed files get a second line with their modified age and git info — that's where it helps you judge whether a change is yours or a surprise. When everything is affirmed the banner shows only the project's `✓` lines and no warning; a project with no instruction files of its own and all globals affirmed gets no banner at all. A trailing `ℹ` line summarizes any `@imports` deeper than two levels, which are reported but not hashed.
 
@@ -61,14 +62,14 @@ bun run <plugin-root>/lib/cli.ts -a       # record hashes
 bun run <plugin-root>/lib/cli.ts --since 2026-09-08T18:00:00Z   # what moved in a window
 ```
 
-`--since <iso>` lists only the tracked files whose mtime falls after the timestamp, each with its status and the subjects of any commits that touched it in that window. `continuity`'s `/wrap` runs it with the session's start time, so a change you made yourself gets summarized at the end of the session that made it rather than surfacing as a trust warning at the start of the next one. A file that was touched but still hash-matches is listed with no call to action — prompting there is the alert fatigue the gate exists to prevent.
+`--since <iso>` lists only the tracked files whose mtime falls after the timestamp, each with its status and the subjects of any commits that touched it in that window. A file with no such commits says why: `no commits in window` only when git tracks it, otherwise `untracked`, `untracked (gitignored)` or `not in a git repo` — a gitignored `CLAUDE.md` never has commits, and saying so reads as reassurance. `continuity`'s `/wrap` runs it with the session's start time, so a change you made yourself gets summarized at the end of the session that made it rather than surfacing as a trust warning at the start of the next one. A file that was touched but still hash-matches is listed with no call to action — prompting there is the alert fatigue the gate exists to prevent.
 
 ## Scope and threat model
 
 **In scope:**
 
 - `<cwd>/CLAUDE.md`
-- Every file under `<cwd>/.claude/rules/` (recursive, symlinks skipped to avoid following malicious links out of the tree)
+- Every file under `<cwd>/.claude/rules/`, recursive, following symlinks to files and directories the way Claude Code's loader does. A linked file is hashed and shown at its real path, flagged `out-of-tree` when it lives elsewhere. Skipping links, as versions before 0.7.0 did, did not stop Claude Code from loading them; it only stopped anyone from watching them.
 - `~/.claude/CLAUDE.md` and every file under `~/.claude/rules/`, collected the same way. These load in every session regardless of project, and sessions now routinely edit them, so leaving them untracked was the larger hole. Set `AFFIRM_GLOBAL_DIR` to point the global root somewhere else.
 - Files any of those reach via Claude Code's `@import` syntax, followed two levels deep. Imports are resolved relative to the importing file (with `~/` and absolute paths supported) and skipped inside code spans/blocks, matching Claude Code. An import that points outside the project is still hashed, just flagged `out-of-tree`. Imports deeper than two levels are reported in the banner but not hashed — depth is capped to keep an unbounded graph from quietly pulling in the world.
 

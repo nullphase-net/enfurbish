@@ -1,7 +1,7 @@
 {
   "name": "affirm",
   "description": "Approval gate for instruction files. Surfaces new or modified CLAUDE.md, .claude/rules/* files (project and user-global) and the files they @import at session start; the user explicitly affirms them before Claude treats them as trusted.",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "license": "MIT",
   "keywords": [
     "security",

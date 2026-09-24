@@ -8,7 +8,14 @@ import {
   sha256OfFile,
 } from "./affirm";
 import { buildInstructionGraph, displayPath, type InstructionGraph } from "./imports";
-import { getMtime, getGitInfo, commitsTouching, type GitInfo } from "./file-meta";
+import {
+  commitsTouching,
+  getGitInfo,
+  getMtime,
+  gitVisibility,
+  type GitInfo,
+  type GitVisibility,
+} from "./file-meta";
 
 function usage(): string {
   return [
@@ -100,7 +107,7 @@ export function renderSince(
     const subjects = commitsTouching(dirname(gf.path), gf.path, iso);
     const commits = subjects.length
       ? `  ${subjects.length} commit${subjects.length === 1 ? "" : "s"}: ${subjects.join("; ")}`
-      : "  no commits in window";
+      : `  ${NO_COMMITS[gitVisibility(dirname(gf.path), gf.path)]}`;
     out(`  ${displayPath(projectDir, gf.path)}  ${status}${commits}`);
   }
   // Only when the hash actually moved. A file edited and reverted within the session
@@ -109,15 +116,26 @@ export function renderSince(
   if (needsReview) out(`run /affirm -a after reviewing`);
 }
 
+/** Why a touched file has no commits in the window. Only "tracked" means there were none. */
+const NO_COMMITS: Record<GitVisibility, string> = {
+  tracked: "no commits in window",
+  untracked: "untracked: git cannot see its changes",
+  ignored: "untracked (gitignored): git cannot see its changes",
+  "no-repo": "not in a git repo",
+  unknown: "git state unknown",
+};
+
+// Hash first: an unreadable file is unreadable whether or not it was ever affirmed.
+// With the NEW check first, `unreadable` was unreachable for any file not in the store.
 function statusOf(file: string, stored: Record<string, string>): string {
-  const prev = stored[file];
-  if (prev === undefined) return "NEW (not yet affirmed)";
   let cur: string;
   try {
     cur = sha256OfFile(file);
   } catch {
     return "unreadable";
   }
+  const prev = stored[file];
+  if (prev === undefined) return "NEW (not yet affirmed)";
   if (prev !== cur) return "CHANGED (hash mismatch)";
   return "affirmed";
 }
@@ -146,10 +164,13 @@ export function runCli(argv: string[], opts: CliOpts): number {
   }
 
   if (arg === "-a" || arg === "--apply") {
-    const { approved } = approveAll(projectDir, hashPath);
+    const { approved, unreadable } = approveAll(projectDir, hashPath);
     opts.out(`Affirmed ${approved.length} file${approved.length === 1 ? "" : "s"} in ${projectDir}:`);
     for (const { path, hash } of approved) {
       opts.out(`  ${displayPath(projectDir, path)}  (${hash.slice(0, 12)}…)`);
+    }
+    for (const path of unreadable) {
+      opts.out(`  ${displayPath(projectDir, path)}  (unreadable — not affirmed)`);
     }
     return 0;
   }

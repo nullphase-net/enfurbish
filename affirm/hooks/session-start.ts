@@ -62,12 +62,12 @@ function deepSummary(projectDir: string, deep: DeepImport[]): string {
 
 export function buildBanner(input: BannerInput): string {
   const { projectDir, classification, meta, deep, now } = input;
-  const { approved, added, changed } = classification;
+  const { approved, added, changed, unreadable = [] } = classification;
 
   // Global files are silent while affirmed: they are identical in every project, so a
   // ✓ line for one is repetition in every banner. They still surface as ✦/✧ below.
   const visible = approved.filter((f) => !meta[f]?.global);
-  if (visible.length === 0 && added.length === 0 && changed.length === 0) return "";
+  if (visible.length + added.length + changed.length + unreadable.length === 0) return "";
 
   let msg = "Affirm: instruction files in scope:\n";
   for (const f of visible) {
@@ -80,6 +80,12 @@ export function buildBanner(input: BannerInput): string {
   for (const f of changed) {
     msg += `  ✧ ${displayPath(projectDir, f)}${annot(projectDir, meta[f])}  [CHANGED — unaffirmed]\n`;
     if (meta[f]) msg += detailLine(meta[f]!, now) + "\n";
+  }
+  // Could not be hashed, so affirm cannot vouch either way. No call to action:
+  // /affirm cannot fix a permission, and Claude Code, running as the same user,
+  // most likely cannot load the file either.
+  for (const f of unreadable) {
+    msg += `  ? ${displayPath(projectDir, f)}${annot(projectDir, meta[f])}  [UNREADABLE — not hashed]\n`;
   }
 
   if (added.length > 0 || changed.length > 0) {

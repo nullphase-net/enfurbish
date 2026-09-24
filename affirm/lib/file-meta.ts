@@ -22,19 +22,19 @@ export type GitInfo = {
  * `continuity`'s `commitsSince` (2000ms) and `gitignore` (5000ms) already had
  * theirs, and "hooks never block the session" rested on this one line.
  *
- * A timeout kills the child and leaves `status` null, so it falls through the
- * same `?? 1` branch as a genuine git failure. That conflation is deliberate
- * here and only here: every caller treats a non-zero code as "no information",
- * which degrades the banner to showing less rather than showing something
- * wrong. Do not add a caller that reads code 1 as a specific cause.
+ * A timeout kills the child and leaves `status` null, which maps to -1: a code
+ * git itself never exits with. Most callers treat any non-zero code as "no
+ * information", which degrades the banner to showing less rather than showing
+ * something wrong. `gitVisibility` is the one caller that reads 1 as a specific
+ * answer, which is why a timeout must not look like 1.
  *
  * The hang path itself is untested — reproducing it needs a git that blocks,
  * which nothing here can arrange cheaply. Neither existing timeout in this repo
  * is tested either; this is a known gap, not an oversight.
  */
-function git(cwd: string, args: string[]): { code: number; stdout: string } {
+function git(cwd: string, args: string[]): { code: number; stdout: string; stderr: string } {
   const r = spawnSync("git", args, { cwd, encoding: "utf8", timeout: 2000 });
-  return { code: r.status ?? 1, stdout: r.stdout ?? "" };
+  return { code: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
 export function getGitInfo(projectDir: string, filePath: string): GitInfo {
@@ -67,4 +67,29 @@ export function commitsTouching(projectDir: string, filePath: string, iso: strin
   const r = git(projectDir, ["log", "--format=%s", `--since=${iso}`, "--", filePath]);
   if (r.code !== 0) return [];
   return r.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+}
+
+export type GitVisibility = "tracked" | "untracked" | "ignored" | "no-repo" | "unknown";
+
+/**
+ * Whether git can see `filePath` at all. An empty `commitsTouching` means "no
+ * commits in window" only for a tracked file; for any other it describes the
+ * query, not the file (symbion 233: this repo's own CLAUDE.md is gitignored, and
+ * "no commits in window" read as reassurance).
+ *
+ * Every answer is matched against the exit codes git documents — ls-files
+ * --error-unmatch and check-ignore both exit 0 for yes and 1 for no — and "not a
+ * git repository" on stderr. Anything else, a timeout included, is "unknown",
+ * never the negative case.
+ */
+export function gitVisibility(projectDir: string, filePath: string): GitVisibility {
+  const inside = git(projectDir, ["rev-parse", "--is-inside-work-tree"]);
+  if (inside.code !== 0 || inside.stdout.trim() !== "true") {
+    return inside.stderr.includes("not a git repository") ? "no-repo" : "unknown";
+  }
+  const tracked = git(projectDir, ["ls-files", "--error-unmatch", "--", filePath]).code;
+  if (tracked === 0) return "tracked";
+  if (tracked !== 1) return "unknown";
+  const ignored = git(projectDir, ["check-ignore", "-q", "--", filePath]).code;
+  return ignored === 0 ? "ignored" : ignored === 1 ? "untracked" : "unknown";
 }
