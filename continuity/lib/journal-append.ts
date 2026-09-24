@@ -14,6 +14,7 @@
  * readers match loosely enough to see the history the strict greps could not.
  */
 import { readFileSync, writeFileSync, existsSync, renameSync, unlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 const HEADER = `# Claude Code tooling journal
 
@@ -47,8 +48,13 @@ export type ToolNote = {
    * to act on or explicitly retire", while offering no way to retire one. So nothing
    * ever was: `--actions` returns every action ever written, 312 of them, with closed
    * and open indistinguishable. pastiche's register gate was re-logged eight times
-   * and all eight sat in the default view. Naming the action in prose is enough —
-   * nothing matches these back to their originals, a reader does.
+   * and all eight sat in the default view.
+   *
+   * Name the row's `#id` from `--actions`; that is what retires it. Prose alone was
+   * the design until 2026-09-24 and it matched correctly every time — a reader could
+   * pair each close with its action — but nothing removed a closed action from the
+   * view, so all five stale rows were already closed and the block had shown the same
+   * five for four days.
    */
   closed?: string[];
 };
@@ -131,14 +137,30 @@ const ACTION = /^-\s*\*{0,2}Action\b\s*(\([^)]*\))?\s*\*{0,2}\s*:\s*\*{0,2}\s*(.
 /** `- Closed: …`, `- **Closed (retired):** …` — the same shape, loose for the same reason. */
 const CLOSED = /^-\s*\*{0,2}Closed\b\s*(\([^)]*\))?\s*\*{0,2}\s*:\s*\*{0,2}\s*(.*)$/;
 
-export type Action = { entry: string; tool: string; qualifier: string; text: string };
+export type Action = { entry: string; tool: string; qualifier: string; text: string; id: string };
+
+/**
+ * Six hex of a content hash, so it needs no stored counter and appending an entry
+ * never renumbers an older line. It is stable for as long as the line is, which in
+ * an append-only file is forever.
+ */
+function actionId(entry: string, tool: string, text: string): string {
+  return createHash("sha1").update(`${entry}\0${tool}\0${text}`).digest("hex").slice(0, 6);
+}
+
+/** Every `#id` a closed line names. Exactly six hex: a seven-char commit sha is not one. */
+function idsIn(text: string): string[] {
+  return [...text.matchAll(/#([0-9a-f]{6})\b/g)].map(m => m[1]);
+}
 
 function collectLines(secs: Section[], re: RegExp): Action[] {
   const out: Action[] = [];
   for (const s of secs) {
     for (const line of s.body) {
       const m = re.exec(line);
-      if (m) out.push({ entry: s.entry, tool: s.tool, qualifier: m[1] ?? "", text: m[2].trim() });
+      if (!m) continue;
+      const text = m[2].trim();
+      out.push({ entry: s.entry, tool: s.tool, qualifier: m[1] ?? "", text, id: actionId(s.entry, s.tool, text) });
     }
   }
   return out;
@@ -161,8 +183,10 @@ function spellings(secs: Section[]): number {
   return new Set(secs.map(s => s.tool)).size;
 }
 
-function row(a: Action): string {
-  return `${a.entry.slice(0, 10)}  ${clip(a.tool, 34).padEnd(34)}  ${a.qualifier ? a.qualifier + " " : ""}${clip(a.text, 100)}`;
+/** Open rows carry the `#id` a close names; closed rows already quote the ids they retire. */
+function row(a: Action, withId = true): string {
+  const id = withId ? `#${a.id}  ` : "";
+  return `${a.entry.slice(0, 10)}  ${id}${clip(a.tool, 34).padEnd(34)}  ${a.qualifier ? a.qualifier + " " : ""}${clip(a.text, 100)}`;
 }
 
 /**
@@ -183,14 +207,24 @@ const STALE_ROWS = 5;
 // there are rows: an instruction the skill carried on every wrap did nothing for
 // months, because retiring an action had no write behind it.
 const STALE_GUIDANCE =
-  "  answer each: still open / already done / never going to happen. Retire it through the closed array of this wrap's entry, or it comes back next session.";
+  "  answer each: still open / already done / never going to happen. Retire it through the closed array of this wrap's entry, naming its #id, or it comes back next session.";
 
 export function reportActions(secs: Section[], tool: string | undefined, limit: number): string {
   const hit = matching(secs, tool);
-  const acts = findActions(hit).reverse();
+  // Retirement is global: a close is written under whatever heading the wrap was
+  // on, which is rarely the heading of the action it retires.
+  const retired = new Set(findClosed(secs).flatMap(c => idsIn(c.text)));
+  const all = findActions(hit).reverse();
+  const acts = all.filter(a => !retired.has(a.id));
   const done = findClosed(hit).reverse();
+  // A close that names no id is every close written before ids existed, and any
+  // later one that forgot: it reads as a retirement and removes nothing.
+  const bare = done.filter(c => idsIn(c.text).length === 0).length;
   const scope = tool ? ` · "${tool}" matches ${hit.length}/${secs.length} sections, ${spellings(hit)} spellings` : "";
-  const head = `${acts.length} action${acts.length === 1 ? "" : "s"}${done.length ? ` · ${done.length} closed` : ""}${scope}`;
+  const closedNote = done.length
+    ? ` · ${done.length} closed${bare ? ` (${bare} name${bare === 1 ? "s" : ""} no #id)` : ""}`
+    : "";
+  const head = `${acts.length} open of ${all.length}${closedNote}${scope}`;
   if (acts.length === 0 && done.length === 0) return head;
 
   const recent = acts.slice(0, limit);
@@ -200,16 +234,45 @@ export function reportActions(secs: Section[], tool: string | undefined, limit: 
     ? acts.slice(Math.max(recent.length, acts.length - STALE_ROWS))
     : [];
   const hidden = acts.length - recent.length - stale.length;
-  // Closed first and uncapped: the whole point is that a retired action stops being
-  // re-logged, and a reader who never reaches it will log it again. There are single
-  // digits of these against hundreds of open ones.
+  // Closed first, so a reader meets what was retired before logging it again. Capped
+  // like the head: uncapped was right at 20 closes, but retiring the backlog on
+  // 2026-09-24 took 24 more (naming 134 ids), and every wrap would print all 44.
+  const shownDone = done.slice(0, limit);
   return [
     head,
-    ...(done.length ? ["closed:", ...done.map(row), "open:"] : []),
-    ...recent.map(row),
+    ...(done.length ? [
+      "closed:",
+      ...shownDone.map(c => row(c, false)),
+      ...(done.length > shownDone.length ? [`+${done.length - shownDone.length} older closed`] : []),
+      "open:",
+    ] : []),
+    ...recent.map(a => row(a)),
     ...(hidden > 0 ? [`+${hidden} older`] : []),
-    ...(stale.length ? ["stale:", STALE_GUIDANCE, ...stale.map(row)] : []),
+    ...(stale.length ? ["stale:", STALE_GUIDANCE, ...stale.map(a => row(a))] : []),
   ].join("\n");
+}
+
+/**
+ * What an appended entry's closes did, checked against the journal before it. A
+ * close that retires nothing looks exactly like one that worked until the next
+ * `--actions`, so the append says so while the writer still has the ids in hand.
+ * Silent when the entry closes nothing.
+ */
+export function reportCloses(before: Section[], added: Section[]): string[] {
+  const known = new Set(findActions(before).map(a => a.id));
+  // Sets: one close may repeat an id in its prose, and a count of mentions is not a
+  // count of actions retired.
+  const retired = new Set<string>();
+  const problems = new Set<string>();
+  for (const c of findClosed(added)) {
+    const ids = idsIn(c.text);
+    if (ids.length === 0) problems.add(`closed line names no #id, retires nothing: "${clip(c.text, 60)}"`);
+    for (const id of ids) {
+      if (known.has(id)) retired.add(`#${id}`);
+      else problems.add(`#${id} matches no action`);
+    }
+  }
+  return [...(retired.size ? [`retired ${retired.size}: ${[...retired].join(" ")}`] : []), ...problems];
 }
 
 export function reportRecent(secs: Section[], tool: string, limit: number): string {
@@ -298,10 +361,13 @@ if (import.meta.main) {
   const sep = base.endsWith("\n") ? "" : "\n";
   const next = base + sep + entry + (entry.endsWith("\n") ? "" : "\n");
 
+  const closes = reportCloses(parseSections(existing), parseSections(entry));
+
   const tmp = journal + "." + process.pid + ".tmp";
   try {
     writeFileSync(tmp, next, "utf8");
     renameSync(tmp, journal);
+    if (closes.length) process.stdout.write(closes.join("\n") + "\n");
     process.exit(0);
   } catch (e: any) {
     try { unlinkSync(tmp); } catch {}

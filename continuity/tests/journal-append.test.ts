@@ -156,6 +156,7 @@ test("--actions prints one guidance line under stale: when the block has rows", 
   const guidance = lines[at + 1];
   expect(guidance).toMatch(/still open/);
   expect(guidance).toMatch(/closed/);
+  expect(guidance).toMatch(/#id/);
   expect(guidance).not.toMatch(/^\d{4}-\d{2}-\d{2}/);   // not a row
   expect(lines.length).toBeGreaterThan(at + 2);   // without this the every() below is vacuous
   expect(lines.slice(at + 2).every(l => /^\d{4}-\d{2}-\d{2}/.test(l))).toBe(true);   // rows follow it
@@ -166,4 +167,113 @@ test("--actions prints no stale block and no guidance when everything fits the h
   expect(r.status).toBe(0);
   expect(r.stdout).not.toContain("stale:");
   expect(r.stdout).not.toMatch(/still open/);
+});
+
+// --- retiring by #id ---------------------------------------------------------
+// Prose closes never left the view: on 2026-09-24 all five stale rows had been
+// closed one to two times each, and the block had shown the same five since
+// 2026-09-20. Every id below is read off the CLI's own row, never recomputed here,
+// so the test cannot agree with itself while disagreeing with the tool.
+
+const ROW = /^\d{4}-\d{2}-\d{2}  #[0-9a-f]{6}  /;
+
+function idOf(out: string, text: string): string {
+  const m = /#([0-9a-f]{6})\b/.exec(out.split("\n").find(l => ROW.test(l) && l.includes(text)) ?? "");
+  if (!m) throw new Error(`no #id row for ${JSON.stringify(text)} in:\n${out}`);
+  return m[1];
+}
+
+const openRows = (out: string) => out.split("\n").filter(l => ROW.test(l));
+
+function closeWith(journal: string, line: string, tool = "toolD") {
+  writeFileSync(journal, readFileSync(journal, "utf8") +
+    `\n## 2026-09-04T10:00:00Z  •  proj  •  dddd4444\n\n### ${tool}  •  verdict: neutral\n- Closed: ${line}\n`);
+}
+
+test("--actions prints a distinct #id on every open row", () => {
+  const r = cli(manyActions(), "--actions", "--limit", "1");
+  const rows = openRows(r.stdout);
+  expect(rows.length).toBe(3);   // head + two stale: every block carries ids
+  expect(new Set(rows.map(l => l.slice(12, 19))).size).toBe(3);
+});
+
+test("a Closed line naming an action's #id retires it from every block, and only it", () => {
+  const j = manyActions();
+  const id = idOf(cli(j, "--actions").stdout, "oldest idea");
+  closeWith(j, `#${id} shipped in 0.10.0`);
+  const r = cli(j, "--actions", "--limit", "1");
+  expect(r.status).toBe(0);
+  expect(r.stdout).not.toContain("oldest idea");
+  expect(openRows(r.stdout).map(l => l.replace(ROW, "").replace(/\s+/g, " ").trim()))
+    .toEqual(["toolC newest idea", "toolB middle idea"]);
+  expect(r.stdout).toContain("shipped in 0.10.0");   // the close itself still shows
+  expect(r.stdout.split("\n")[0]).toMatch(/^2 open of 3/);
+});
+
+test("a close under another heading retires the action even when --tool filters to the action's own", () => {
+  const j = manyActions();
+  const id = idOf(cli(j, "--actions").stdout, "oldest idea");
+  expect(openRows(cli(j, "--actions", "--tool", "toolA").stdout).length).toBe(1);
+  closeWith(j, `#${id} done`, "somebody else");
+  const r = cli(j, "--actions", "--tool", "toolA");
+  expect(openRows(r.stdout).length).toBe(0);
+  expect(r.stdout.split("\n")[0]).toMatch(/^0 open of 1/);
+});
+
+test("a Closed line with no #id retires nothing, and the head says so", () => {
+  const j = manyActions();
+  closeWith(j, "the oldest idea is done");
+  const r = cli(j, "--actions");
+  expect(openRows(r.stdout).some(l => l.includes("oldest idea"))).toBe(true);
+  expect(r.stdout.split("\n")[0]).toMatch(/3 open of 3 · 1 closed \(1 names? no #id\)/);
+});
+
+test("the closed block is capped at --limit, with the overflow counted", () => {
+  const j = manyActions();
+  closeWith(j, "first retirement");
+  closeWith(j, "second retirement");
+  const r = cli(j, "--actions", "--limit", "1");
+  expect(r.stdout).toContain("second retirement");
+  expect(r.stdout).not.toContain("first retirement");
+  expect(r.stdout).toContain("+1 older closed");
+});
+
+// The wrap writes closes through formatEntry, not by hand: a second producer of
+// the same line, so it gets its own case.
+const entry = (closed?: string[]) => JSON.stringify({
+  timestamp: "2026-09-04T10:00:00Z", slug: "proj", session: "dddd4444", arc: "x",
+  tools: [{ name: "toolD", verdict: "neutral", ...(closed ? { closed } : {}) }],
+});
+
+test("appending an entry whose closed array names an action's #id reports it retired", () => {
+  const j = manyActions();
+  const id = idOf(cli(j, "--actions").stdout, "oldest idea");
+  const res = run(j, entry([`#${id} done`]));
+  expect(res.status).toBe(0);
+  expect(res.stdout.trim()).toBe(`retired 1: #${id}`);
+  expect(cli(j, "--actions").stdout).not.toContain("oldest idea");
+});
+
+test("a closed string with no #id, or an id no action has, is reported at append time", () => {
+  const j = manyActions();
+  const ids = openRows(cli(j, "--actions").stdout).map(l => l.slice(13, 19));
+  expect(ids).not.toContain("ffffff");   // the unknown id below must really be unknown
+  const res = run(j, entry(["prose only, like every close before 0.10.0", "#ffffff nope"]));
+  expect(res.status).toBe(0);
+  expect(res.stdout).toMatch(/names no #id, retires nothing: "prose only/);
+  expect(res.stdout).toContain("#ffffff matches no action");
+  expect(res.stdout).not.toContain("retired");
+});
+
+test("an entry that closes nothing appends silently", () => {
+  const res = run(manyActions(), entry());
+  expect(res.status).toBe(0);
+  expect(res.stdout).toBe("");
+});
+
+test("a close naming the same #id twice counts it once", () => {
+  const j = manyActions();
+  const id = idOf(cli(j, "--actions").stdout, "oldest idea");
+  const res = run(j, entry([`#${id} done`, `#${id} and again`]));
+  expect(res.stdout.trim()).toBe(`retired 1: #${id}`);
 });

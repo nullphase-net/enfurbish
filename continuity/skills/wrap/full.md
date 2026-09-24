@@ -18,7 +18,7 @@ Then the standing backlog, once:
 bun run "<skill-base-dir>/../../lib/journal-append.ts" --journal ~/.claude/tooling-journal.md --actions
 ```
 
-Three blocks: `closed:` first and uncapped, the newest open actions, then `stale:` with the oldest actions nobody has retired and, under the label, what to do with them. The `closed` array it names is the one in step 4's entry. A head row marked `(recurring, unmoved)` or `(10th repetition)` gets the same answer as a stale one: open, done, or never, not an eleventh log line.
+Three blocks: `closed:` first, the newest open actions, then `stale:` with the oldest actions nobody has retired and, under the label, what to do with them. Every open row carries a `#id`. The `closed` array it names is the one in step 4's entry, and a close retires only the ids it names. A head row marked `(recurring, unmoved)` or `(10th repetition)` gets the same answer as a stale one: open, done, or never, not an eleventh log line.
 
 No journal yet → both commands report zero; the first append creates it with a header.
 
@@ -74,7 +74,7 @@ cat <<'JOURNAL' | bun run "<skill-base-dir>/../../lib/journal-append.ts" --journ
       "usage": "6 calls, 2 errors",
       "verdict": "hurt",
       "notes": ["Bullet observation.", "Another one."],
-      "closed": ["the standing action you retired, and why"],
+      "closed": ["#1c1aaf #c079d3 done or never, and why"],
       "action": "concrete improvement idea"
     }
   ]
@@ -82,7 +82,7 @@ cat <<'JOURNAL' | bun run "<skill-base-dir>/../../lib/journal-append.ts" --journ
 JOURNAL
 ```
 
-`usage`, `notes`, `closed` and `action` are optional. Omit `closed` on the wraps that retire nothing (most of them), and omit `action` when there genuinely isn't one rather than writing "none". Raw markdown on stdin still appends verbatim, for a retroactive or hand-written entry; JSON is the default because a format the model reassembles from memory drifts. Empty stdin is a no-op.
+`usage`, `notes`, `closed` and `action` are optional. One `closed` string may retire several rows of the same idea. The append prints what each close retired and flags any that retired nothing; a flagged one leaves its action open for the next wrap, so note it in the retro. Omit `closed` on the wraps that retire nothing (most of them), and omit `action` when there genuinely isn't one rather than writing "none". Raw markdown on stdin still appends verbatim, for a retroactive or hand-written entry; JSON is the default because a format the model reassembles from memory drifts. Empty stdin is a no-op.
 
 **Verdict:** `helped` — output the session actually used. `hurt` — wasted time or tokens, produced wrong info, or required correction. `neutral` — ran without error and without observable signal either way.
 
