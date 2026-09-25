@@ -7,8 +7,8 @@ import { spawnSync } from "node:child_process";
 import { gitInitClean } from "./helpers/git";
 
 test("encodeCwd replaces / with - including leading slash", () => {
-  expect(encodeCwd("/Volumes/chonk/projects/claude"))
-    .toBe("-Volumes-chonk-projects-claude");
+  expect(encodeCwd("/Volumes/data/projects/claude"))
+    .toBe("-Volumes-data-projects-claude");
 });
 
 test("encodeCwd handles a simple path", () => {
@@ -17,13 +17,13 @@ test("encodeCwd handles a simple path", () => {
 
 test("findTranscript returns the file in the encoded-cwd dir whose first event matches", async () => {
   const root = mkdtempSync(join(tmpdir(), "wrap-scan-"));
-  const cwd = "/Volumes/chonk/projects/claude";
-  const proj = join(root, "-Volumes-chonk-projects-claude");
+  const cwd = "/Volumes/data/projects/claude";
+  const proj = join(root, "-Volumes-data-projects-claude");
   mkdirSync(proj, { recursive: true });
 
   const f1 = join(proj, "11111111-0000-0000-0000-000000000000.jsonl");
   writeFileSync(f1, JSON.stringify({
-    type: "user", cwd: "/Volumes/chonk/projects/other",
+    type: "user", cwd: "/Volumes/data/projects/other",
     timestamp: "2026-05-10T20:00:00.000Z",
     sessionId: "11111111-0000-0000-0000-000000000000",
     message: { role: "user", content: [{ type: "text", text: "x" }] },
@@ -44,8 +44,8 @@ test("findTranscript returns the file in the encoded-cwd dir whose first event m
 
 test("findTranscript picks most recent by last-event timestamp when multiple match", async () => {
   const root = mkdtempSync(join(tmpdir(), "wrap-scan-"));
-  const cwd = "/Volumes/chonk/projects/claude";
-  const proj = join(root, "-Volumes-chonk-projects-claude");
+  const cwd = "/Volumes/data/projects/claude";
+  const proj = join(root, "-Volumes-data-projects-claude");
   mkdirSync(proj, { recursive: true });
 
   const older = join(proj, "33333333-0000-0000-0000-000000000000.jsonl");
@@ -66,7 +66,7 @@ test("findTranscript picks most recent by last-event timestamp when multiple mat
 
 test("findTranscript falls back to global scan when encoded-cwd dir missing", async () => {
   const root = mkdtempSync(join(tmpdir(), "wrap-scan-"));
-  const cwd = "/Volumes/chonk/projects/claude";
+  const cwd = "/Volumes/data/projects/claude";
   const otherProj = join(root, "-some-other-encoding");
   mkdirSync(otherProj, { recursive: true });
   const f = join(otherProj, "55555555-0000-0000-0000-000000000000.jsonl");
@@ -88,8 +88,8 @@ test("findTranscript throws not-found when nothing matches", async () => {
 });
 
 test("findTranscript resolves cwd through a symlink to its canonical path", async () => {
-  // Models the field-report case: $(pwd) returns /Users/tb/projects/X (symlink)
-  // but the transcript dir is encoded from /Volumes/chonk/projects/X (canonical).
+  // Models the field-report case: $(pwd) returns /Users/me/projects/X (symlink)
+  // but the transcript dir is encoded from /Volumes/data/projects/X (canonical).
   const root = mkdtempSync(join(tmpdir(), "wrap-scan-sl-"));
   const workspace = mkdtempSync(join(tmpdir(), "wrap-ws-"));
   const realPath = join(workspace, "real");
@@ -209,7 +209,7 @@ import { spawnSync } from "node:child_process";
 
 test("CLI emits valid JSON for happy path", () => {
   const fixturesRoot = mkdtempSync(join(tmpdir(), "wrap-cli-"));
-  const proj = join(fixturesRoot, "-Volumes-chonk-projects-claude");
+  const proj = join(fixturesRoot, "-Volumes-data-projects-claude");
   mkdirSync(proj, { recursive: true });
   const fixturePath = join(import.meta.dir, "..", "fixtures", "happy-session.jsonl");
   const target = join(proj, "abc12345-1234-5678-90ab-cdef00000001.jsonl");
@@ -217,7 +217,7 @@ test("CLI emits valid JSON for happy path", () => {
 
   const res = spawnSync("bun", [
     "run", join(import.meta.dir, "..", "lib", "scan.ts"),
-    "--cwd", "/Volumes/chonk/projects/claude",
+    "--cwd", "/Volumes/data/projects/claude",
     "--projects-root", fixturesRoot,
   ], { encoding: "utf8" });
 
@@ -332,7 +332,7 @@ test("parseTranscript still counts a prompt that opens with an image or a ! comm
 // symbion d77 filed "a compaction during the wrap suppresses the turn-count caveat".
 // The caveat's premise was wrong: a compaction does not truncate the jsonl. Both
 // compacted transcripts on this machine (Claude Code 2.1.268 and 2.1.274) keep every
-// pre-compaction record in the same file — umbel eecf8708: 12 user turns before
+// pre-compaction record in the same file — one has 12 user turns before
 // its boundary, 3 after — so the count covers the whole session either way.
 test("parseTranscript counts turns on both sides of a compaction", async () => {
   const r = await parseTranscript(writeSession([

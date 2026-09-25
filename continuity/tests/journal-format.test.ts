@@ -46,7 +46,7 @@ test("what formatEntry writes, parseSections reads back", () => {
 // Every heading and Action spelling below is copied from the real journal.
 
 const DRIFTED = [
-  "## 2026-08-14T00:18:00-05:00  •  topologicat  •  0a4ddd46",
+  "## 2026-08-14T00:18:00-05:00  •  myapp  •  0a4ddd46",
   "",
   "### continuity scan.ts  •  1 run  •  verdict: helped",
   "- Action: count command-wrapped user events as user turns.",

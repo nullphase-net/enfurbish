@@ -40,8 +40,8 @@ async function peekFirstCwdAndLastTs(path: string): Promise<{ firstCwd?: string;
 export async function findTranscript({ cwd, projectsRoot }: FindArgs): Promise<FindResult> {
   const root = projectsRoot ?? join(homedir(), ".claude", "projects");
   // 2026-05-22: callers pass cwd via $(pwd), which on macOS resolves
-  // symlinked paths like /Users/tb/projects/... rather than the canonical
-  // /Volumes/chonk/projects/... that owns the transcript dir. Canonicalize
+  // symlinked paths like /Users/me/projects/... rather than the canonical
+  // /Volumes/data/projects/... that owns the transcript dir. Canonicalize
   // both sides so the lookup survives the symlink boundary.
   const canonicalCwd = safeRealpath(cwd);
   const candidates: string[] = [];
@@ -102,7 +102,7 @@ export type ScanOk = {
    * session, not a caveat on the counts: a compaction does not truncate the jsonl,
    * so every count here covers the whole session either side of one. Both compacted
    * transcripts on this machine keep their pre-compaction records (Claude Code
-   * 2.1.268, 2.1.274; umbel eecf8708: 12 user turns before its boundary, 3 after).
+   * 2.1.268, 2.1.274; one has 12 user turns before its boundary, 3 after).
    * A scan taken before a late compaction under-reports only this number.
    */
   compaction_count: number;
