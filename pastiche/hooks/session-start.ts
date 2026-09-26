@@ -50,19 +50,52 @@ export function buildOutput(pluginRoot: string, sessionId: string | null = null)
   return buildContext({ cfg, due, notes: loadNotes(pluginRoot, cfg), pluginRoot });
 }
 
+/**
+ * One line when this session runs a different version of this plugin than the checkout
+ * it is working in. An edit there reaches no session until it ships ("Pushing is not
+ * shipping", CLAUDE.md): three sessions ran a stale cached /wrap, one of them the
+ * release of the plugin it was running, and pastiche's 0.5.x cache kept minting
+ * duplicates after the 0.6.x guard was committed. Duplicated in each plugin's hook,
+ * since plugins share no code. "" when the cwd is not this plugin's checkout (or the
+ * plugin's own directory in it), the versions match, or a manifest will not read.
+ */
+export function supersededNote(pluginRoot: string, projectDir: string): string {
+  const read = (dir: string) => {
+    try {
+      return JSON.parse(readFileSync(join(dir, ".claude-plugin", "plugin.json"), "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const running = read(pluginRoot);
+  if (typeof running?.name !== "string" || typeof running?.version !== "string") return "";
+  const here = [join(projectDir, running.name), projectDir].map(read).find((m) => m?.name === running.name);
+  if (typeof here?.version !== "string" || here.version === running.version) return "";
+  const market = /\/plugins\/cache\/([^/]+)\//.exec(pluginRoot)?.[1];
+  const update = market ? `\`claude plugin update ${running.name}@${market}\`` : "update the plugin";
+  return `${running.name} ${running.version} is running, but this checkout has ${here.version}. ` +
+    `It reaches sessions only through the marketplace: push, then ${update}, then /reload-plugins.`;
+}
+
 if (import.meta.main) {
   // Never throw and never block: a SessionStart hook that fails should cost the
   // user nothing more than a session without vocabulary in it.
   try {
     const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || join(import.meta.dir, "..");
     const context = buildOutput(pluginRoot, readSessionId());
-    if (context === null) {
+    const stale = supersededNote(pluginRoot, process.env.CLAUDE_PROJECT_DIR || process.cwd());
+    if (context === null && !stale) {
       debugLog("no configured languages — emitting empty");
       process.stdout.write("{}\n");
     } else {
-      debugLog(`injected ${context.length} chars`);
+      debugLog(`injected ${context?.length ?? 0} chars${stale ? " + stale-copy note" : ""}`);
+      // The vocabulary goes to the model only; a stale-copy note goes to both.
       process.stdout.write(JSON.stringify({
-        hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context },
+        ...(stale ? { systemMessage: stale } : {}),
+        hookSpecificOutput: {
+          hookEventName: "SessionStart",
+          additionalContext: [stale, context].filter(Boolean).join("\n\n"),
+        },
       }) + "\n");
     }
     process.exit(0);

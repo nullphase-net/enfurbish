@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { approveAll, normalizeProjectDir, saveHashes, sha256OfFile } from "../lib/affirm";
-import { buildBanner, type FileMeta } from "../hooks/session-start";
+import { buildBanner, supersededNote, type FileMeta } from "../hooks/session-start";
 
 function fileMeta(over: Partial<FileMeta> = {}): FileMeta {
   return {
@@ -164,6 +164,43 @@ test("hook reports a parent's CLAUDE.md on a subdirectory launch", () => {
   mkdirSync(join(dir, "sub"));
   const res = runHook({ CLAUDE_PROJECT_DIR: join(dir, "sub") }, home);
   expect(JSON.parse(res.stdout).systemMessage).toContain(`✦ ${join(dir, "CLAUDE.md")} (ancestor)  [NEW — unaffirmed]`);
+});
+
+
+// A session running a stale copy of the plugin whose checkout it is working in.
+function manifests(name: string, running: string, here: string) {
+  const base = mkdtempSync(join(tmpdir(), "superseded-"));
+  const pluginRoot = join(base, "plugins", "cache", "mkt", name, running);
+  const projectDir = join(base, "checkout");
+  for (const [dir, version] of [[pluginRoot, running], [join(projectDir, name), here]]) {
+    mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name, version }));
+  }
+  return { pluginRoot, projectDir };
+}
+
+test("supersededNote names both versions and the way to ship when they differ", () => {
+  const { pluginRoot, projectDir } = manifests("affirm", "0.1.0", "0.2.0");
+  const line = "affirm 0.1.0 is running, but this checkout has 0.2.0. It reaches sessions only through the " +
+    "marketplace: push, then `claude plugin update affirm@mkt`, then /reload-plugins.";
+  expect(supersededNote(pluginRoot, projectDir)).toBe(line);
+  expect(supersededNote(pluginRoot, join(projectDir, "affirm"))).toBe(line); // cwd = the plugin's own dir
+});
+
+test("supersededNote is empty when the versions match or the cwd is not the checkout", () => {
+  const same = manifests("affirm", "0.1.0", "0.1.0");
+  expect(supersededNote(same.pluginRoot, same.projectDir)).toBe("");
+  const other = manifests("affirm", "0.1.0", "0.2.0");
+  expect(supersededNote(other.pluginRoot, mkdtempSync(join(tmpdir(), "elsewhere-")))).toBe("");
+});
+
+test("hook emits the note on both channels beside the banner", () => {
+  const { pluginRoot, projectDir } = manifests("affirm", "0.1.0", "0.2.0");
+  const home = mkDir("affirm-home-stale-");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const json = JSON.parse(runHook({ CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: projectDir }, home).stdout);
+  expect(json.systemMessage).toContain("affirm 0.1.0 is running");
+  expect(json.hookSpecificOutput.additionalContext).toContain("affirm 0.1.0 is running");
 });
 
 test("emits {} when no instruction files exist", () => {

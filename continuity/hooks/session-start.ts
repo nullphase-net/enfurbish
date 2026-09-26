@@ -110,6 +110,33 @@ function readHookInput(): { sessionId: string | null; source: string | null } {
   }
 }
 
+/**
+ * One line when this session runs a different version of this plugin than the checkout
+ * it is working in. An edit there reaches no session until it ships ("Pushing is not
+ * shipping", CLAUDE.md): three sessions ran a stale cached /wrap, one of them the
+ * release of the plugin it was running, and pastiche's 0.5.x cache kept minting
+ * duplicates after the 0.6.x guard was committed. Duplicated in each plugin's hook,
+ * since plugins share no code. "" when the cwd is not this plugin's checkout (or the
+ * plugin's own directory in it), the versions match, or a manifest will not read.
+ */
+export function supersededNote(pluginRoot: string, projectDir: string): string {
+  const read = (dir: string) => {
+    try {
+      return JSON.parse(readFileSync(join(dir, ".claude-plugin", "plugin.json"), "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const running = read(pluginRoot);
+  if (typeof running?.name !== "string" || typeof running?.version !== "string") return "";
+  const here = [join(projectDir, running.name), projectDir].map(read).find((m) => m?.name === running.name);
+  if (typeof here?.version !== "string" || here.version === running.version) return "";
+  const market = /\/plugins\/cache\/([^/]+)\//.exec(pluginRoot)?.[1];
+  const update = market ? `\`claude plugin update ${running.name}@${market}\`` : "update the plugin";
+  return `${running.name} ${running.version} is running, but this checkout has ${here.version}. ` +
+    `It reaches sessions only through the marketplace: push, then ${update}, then /reload-plugins.`;
+}
+
 const DEFAULT_FIRSTFIRE_DIR = join(homedir(), ".claude", "state", "continuity-firstfire");
 
 function formatSlowNote(elapsedMs: number, walks: Map<string, number>): string {
@@ -167,14 +194,16 @@ if (import.meta.main) {
     const handoffs = collect(sessionCwd, projectRoot, files);
     const now = Date.now();
     const banner = buildBanner({ sessionCwd, projectRoot, handoffs, now, cut });
+    const stale = supersededNote(process.env.CLAUDE_PLUGIN_ROOT || join(import.meta.dir, ".."), sessionCwd);
+    const withStale = (s: string | null) => [s, stale].filter(Boolean).join("\n");
     const totalMs = elapsedMs + (performance.now() - t0);
     debugLog(`cwd=${sessionCwd} root=${projectRoot} files=${files.length} elapsedMs=${totalMs.toFixed(1)} walkMs=${elapsedMs.toFixed(1)} emit=${banner === null ? "empty" : "banner"}`);
-    if (banner === null) {
+    if (banner === null && !stale) {
       process.stdout.write("{}\n");
     } else {
       const slowMsRaw = Number.parseInt(process.env.CONTINUITY_SLOW_MS ?? "500", 10);
       const slowMs = Number.isFinite(slowMsRaw) ? slowMsRaw : 500;
-      const withNote = totalMs > slowMs
+      const withNote = banner && totalMs > slowMs
         ? banner + formatSlowNote(totalMs, walks)
         : banner;
       // Two channels, two readers. systemMessage reaches only the terminal, and a
@@ -183,10 +212,10 @@ if (import.meta.main) {
       // slow-scan note is operator diagnostics and stays on the terminal. File
       // content enters context only via /next.
       process.stdout.write(JSON.stringify({
-        ...(modelOnly ? {} : { systemMessage: withNote }),
+        ...(modelOnly ? {} : { systemMessage: withStale(withNote) }),
         hookSpecificOutput: {
           hookEventName: "SessionStart",
-          additionalContext: buildBanner({ sessionCwd, projectRoot, handoffs, now, cut, channel: "model" }) ?? banner,
+          additionalContext: withStale(buildBanner({ sessionCwd, projectRoot, handoffs, now, cut, channel: "model" })),
         },
       }) + "\n");
     }

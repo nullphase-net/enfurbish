@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { buildBanner, scanForNextSessions } from "../hooks/session-start";
+import { buildBanner, scanForNextSessions, supersededNote } from "../hooks/session-start";
 import type { Handoff } from "../lib/handoffs";
 import { gitInitClean } from "./helpers/git";
 
@@ -42,6 +42,41 @@ test("hook reports a cut scan end-to-end on both channels", () => {
   const json = JSON.parse(runHook({ CLAUDE_PROJECT_DIR: dir, CONTINUITY_SCAN_MS: "0" }).stdout);
   expect(json.systemMessage).toContain("1 dir under");
   expect(json.hookSpecificOutput.additionalContext).toContain("1 dir under");
+});
+
+
+// A session running a stale copy of the plugin whose checkout it is working in.
+function manifests(name: string, running: string, here: string) {
+  const base = mkdtempSync(join(tmpdir(), "superseded-"));
+  const pluginRoot = join(base, "plugins", "cache", "mkt", name, running);
+  const projectDir = join(base, "checkout");
+  for (const [dir, version] of [[pluginRoot, running], [join(projectDir, name), here]]) {
+    mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name, version }));
+  }
+  return { pluginRoot, projectDir };
+}
+
+test("supersededNote names both versions and the way to ship when they differ", () => {
+  const { pluginRoot, projectDir } = manifests("continuity", "0.1.0", "0.2.0");
+  const line = "continuity 0.1.0 is running, but this checkout has 0.2.0. It reaches sessions only through the " +
+    "marketplace: push, then `claude plugin update continuity@mkt`, then /reload-plugins.";
+  expect(supersededNote(pluginRoot, projectDir)).toBe(line);
+  expect(supersededNote(pluginRoot, join(projectDir, "continuity"))).toBe(line); // cwd = the plugin's own dir
+});
+
+test("supersededNote is empty when the versions match or the cwd is not the checkout", () => {
+  const same = manifests("continuity", "0.1.0", "0.1.0");
+  expect(supersededNote(same.pluginRoot, same.projectDir)).toBe("");
+  const other = manifests("continuity", "0.1.0", "0.2.0");
+  expect(supersededNote(other.pluginRoot, mkdtempSync(join(tmpdir(), "elsewhere-")))).toBe("");
+});
+
+test("hook emits the note on both channels even with no handoff to report", () => {
+  const { pluginRoot, projectDir } = manifests("continuity", "0.1.0", "0.2.0");
+  const json = JSON.parse(runHook({ CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: projectDir }).stdout);
+  expect(json.systemMessage).toContain("continuity 0.1.0 is running");
+  expect(json.hookSpecificOutput.additionalContext).toContain("continuity 0.1.0 is running");
 });
 
 test("emits empty JSON when no NEXT_SESSION.md exists anywhere", () => {

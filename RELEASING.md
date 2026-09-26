@@ -28,6 +28,8 @@ If a change touches more than one plugin, version each one on its own and give e
 5. Push branch + tag: `git push && git push origin <plugin>-vX.Y.Z`.
 6. On any machine running the plugin, pull the new version through Claude Code's plugin update flow (the marketplace caches by commit sha, so a `git pull` of the cache directory or a `/plugin update <name>@enfurbish` is required — it is NOT picked up automatically until then).
 
+Until step 6 runs, each plugin's `SessionStart` hook says so in any session whose cwd is this checkout (or the plugin's own directory in it): `continuity 0.11.0 is running, but this checkout has 0.12.0. …` on both channels. It compares the running copy's `plugin.json` against the checkout's, so it also fires after a checkout moves back to an older commit.
+
 ## Where to look if it doesn't update
 
 - `~/.claude/plugins/installed_plugins.json` — what Claude Code thinks is installed. Compare `gitCommitSha` to the tag's commit.

@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { DORMANT_AFTER } from "../lib/pastiche";
+import { supersededNote } from "../hooks/session-start";
 
 const HOOK = join(import.meta.dir, "..", "hooks", "session-start.ts");
 const ROOT = join(import.meta.dir, "..");
@@ -26,6 +27,45 @@ async function runHook(
   const stdout = await new Response(proc.stdout).text();
   return { stdout, code: await proc.exited };
 }
+
+
+// A session running a stale copy of the plugin whose checkout it is working in.
+function manifests(name: string, running: string, here: string) {
+  const base = mkdtempSync(join(tmpdir(), "superseded-"));
+  const pluginRoot = join(base, "plugins", "cache", "mkt", name, running);
+  const projectDir = join(base, "checkout");
+  for (const [dir, version] of [[pluginRoot, running], [join(projectDir, name), here]]) {
+    mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name, version }));
+  }
+  return { pluginRoot, projectDir };
+}
+
+test("supersededNote names both versions and the way to ship when they differ", () => {
+  const { pluginRoot, projectDir } = manifests("pastiche", "0.1.0", "0.2.0");
+  const line = "pastiche 0.1.0 is running, but this checkout has 0.2.0. It reaches sessions only through the " +
+    "marketplace: push, then `claude plugin update pastiche@mkt`, then /reload-plugins.";
+  expect(supersededNote(pluginRoot, projectDir)).toBe(line);
+  expect(supersededNote(pluginRoot, join(projectDir, "pastiche"))).toBe(line); // cwd = the plugin's own dir
+});
+
+test("supersededNote is empty when the versions match or the cwd is not the checkout", () => {
+  const same = manifests("pastiche", "0.1.0", "0.1.0");
+  expect(supersededNote(same.pluginRoot, same.projectDir)).toBe("");
+  const other = manifests("pastiche", "0.1.0", "0.2.0");
+  expect(supersededNote(other.pluginRoot, mkdtempSync(join(tmpdir(), "elsewhere-")))).toBe("");
+});
+
+test("hook emits the note on both channels even with no languages configured", async () => {
+  const { pluginRoot, projectDir } = manifests("pastiche", "0.1.0", "0.2.0");
+  const proc = Bun.spawn(["bun", "run", HOOK], {
+    env: { ...process.env, PASTICHE_DIR: freshDir(), CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: projectDir },
+    stdin: "ignore", stdout: "pipe", stderr: "pipe",
+  });
+  const json = JSON.parse(await new Response(proc.stdout).text());
+  expect(json.systemMessage).toContain("pastiche 0.1.0 is running");
+  expect(json.hookSpecificOutput.additionalContext).toContain("pastiche 0.1.0 is running");
+});
 
 describe("session-start hook", () => {
   // The gate is configured languages, not the ledger file. Nothing to teach

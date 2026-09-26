@@ -122,6 +122,33 @@ function readHookInput(): { sessionId: string | null; source: string | null } {
   }
 }
 
+/**
+ * One line when this session runs a different version of this plugin than the checkout
+ * it is working in. An edit there reaches no session until it ships ("Pushing is not
+ * shipping", CLAUDE.md): three sessions ran a stale cached /wrap, one of them the
+ * release of the plugin it was running, and pastiche's 0.5.x cache kept minting
+ * duplicates after the 0.6.x guard was committed. Duplicated in each plugin's hook,
+ * since plugins share no code. "" when the cwd is not this plugin's checkout (or the
+ * plugin's own directory in it), the versions match, or a manifest will not read.
+ */
+export function supersededNote(pluginRoot: string, projectDir: string): string {
+  const read = (dir: string) => {
+    try {
+      return JSON.parse(readFileSync(join(dir, ".claude-plugin", "plugin.json"), "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const running = read(pluginRoot);
+  if (typeof running?.name !== "string" || typeof running?.version !== "string") return "";
+  const here = [join(projectDir, running.name), projectDir].map(read).find((m) => m?.name === running.name);
+  if (typeof here?.version !== "string" || here.version === running.version) return "";
+  const market = /\/plugins\/cache\/([^/]+)\//.exec(pluginRoot)?.[1];
+  const update = market ? `\`claude plugin update ${running.name}@${market}\`` : "update the plugin";
+  return `${running.name} ${running.version} is running, but this checkout has ${here.version}. ` +
+    `It reaches sessions only through the marketplace: push, then ${update}, then /reload-plugins.`;
+}
+
 const DEFAULT_FIRSTFIRE_DIR = join(homedir(), ".claude", "state", "affirm-firstfire");
 
 if (import.meta.main) {
@@ -146,8 +173,10 @@ if (import.meta.main) {
     }
 
     const projectDir = normalizeProjectDir(process.env.CLAUDE_PROJECT_DIR || process.cwd());
+    const stale = supersededNote(process.env.CLAUDE_PLUGIN_ROOT || join(import.meta.dir, ".."), projectDir);
+    const withStale = (s: string) => [s, stale].filter(Boolean).join("\n");
     const graph = buildInstructionGraph(projectDir);
-    if (graph.files.length === 0) {
+    if (graph.files.length === 0 && !stale) {
       process.stdout.write("{}\n");
       process.exit(0);
     }
@@ -182,12 +211,12 @@ if (import.meta.main) {
     // without the second the model runs under an unaffirmed CLAUDE.md with no way
     // to know. The model's copy swaps the call to action for a guard: affirming is
     // the user's attestation. Instruction content never goes in on either.
-    process.stdout.write((systemMessage
+    process.stdout.write((systemMessage || stale
       ? JSON.stringify({
-          ...(modelOnly ? {} : { systemMessage }),
+          ...(modelOnly ? {} : { systemMessage: withStale(systemMessage) }),
           hookSpecificOutput: {
             hookEventName: "SessionStart",
-            additionalContext: buildBanner({ ...bannerInput, channel: "model" }),
+            additionalContext: withStale(buildBanner({ ...bannerInput, channel: "model" })),
           },
         })
       : "{}") + "\n");
