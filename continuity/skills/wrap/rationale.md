@@ -33,7 +33,8 @@ The evidence behind the rules in `SKILL.md` and `full.md`, grouped by step. Noth
 - **The header is rendered.** A timestamp composed from memory wrote UTC clock-time wearing a CDT offset, 5h fast, into a pointer, and every `--since` window derived from it under-reported silently until a human noticed. The clock is deterministic, so the clock supplies it.
 - **Say "untested" in words.** A hunch stated with two supporting statistics is indistinguishable from a result. A magic prefix would be a parse contract with nothing parsing it; `/next` reads items semantically.
 - **Name the artifact.** "Zero detections after BH" costs the next session an archaeology dig to tell "already done" from "to do"; "zero detections after BH (`results/h10b-corpus-101-K199.json`, `09fd257`)" does not.
-- **Verify repo claims.** A pointer that proposes an infeasible plan costs the next session real time and, if believed, spends a scarce resource on it. Usually three lines of arithmetic.
+- **Verify repo claims.** A pointer that proposes an infeasible plan costs the next session real time and, if believed, spends a scarce resource on it. Usually three lines of arithmetic. **Including this session's own numbers:** every earlier framing read as guarding against other sessions' facts, and the expensive case was a measurement 15 minutes old (journal #672c2d, 2026-08-21).
+- **State a condition's status.** An item worded "do X if Y" was written when Y's status was known and read when it was not; an unattended session obeyed the stale condition (journal #8cb6b4, 2026-09-04).
 - **A delegated open list.** Measured 2026-09-21 with dry-run agents on a handoff that named its store: five of five runs of the previous skill text already honoured the file's own section, so the paragraph is the contract written down, not a behaviour change. The line that changed behaviour is in `/next`, for the case with no file at all.
 
 ## Step 6: affirm

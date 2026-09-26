@@ -167,6 +167,14 @@ export const FILES_CHANGED_CAP = 50;
  * stat'd and is kept rather than dropped; missing a real deletion costs more than
  * the occasional stale one.
  *
+ * BLIND TO UNTRACKED-AND-GITIGNORED PATHS. Plain `--porcelain` omits them, so a
+ * project that ignores its own notes, `.private/` docs or `CLAUDE.md` shows edits to
+ * them as nothing: 2026-09-18 listed 18 files and 2026-09-21 listed 17, both without
+ * the `CLAUDE.md` and `NEXT_SESSION.md` those sessions rewrote. Absence here is not
+ * evidence a path went untouched. `--ignored` was rejected: it would also list build
+ * output and dependency dirs touched in the window. The instruction files are the
+ * ones that matter, and /wrap already asks `affirm --since` about exactly those.
+ *
  * null means git could not answer. That is not the same fact as an empty list.
  * The full list comes back uncapped; the caller caps it, because a cap that discards
  * the count of what it discarded is the silent-truncation this repo bans.
@@ -293,7 +301,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
   const skillsSet = new Set<string>();
   const editsByFile = new Map<string, number>();   // file_path → last-seen index
   let editIdx = 0;
-  let filesReadCount = 0;
+  const filesRead = new Set<string>(); // distinct paths, like files_edited; tools.Read.calls counts calls
   let userTurns = 0;
   let modelTurns = 0;
   let compactionCount = 0;
@@ -377,8 +385,8 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
               typeof c.input?.file_path === "string") {
             editsByFile.set(c.input.file_path, editIdx++);
           }
-          if (name === "Read") {
-            filesReadCount++;
+          if (name === "Read" && typeof c.input?.file_path === "string") {
+            filesRead.add(c.input.file_path);
           }
         }
       }
@@ -437,7 +445,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
     ...(gitChanged && gitChanged.length > FILES_CHANGED_CAP
       ? { files_changed_hidden: gitChanged.length - FILES_CHANGED_CAP }
       : {}),
-    files_read_count: filesReadCount,
+    files_read_count: filesRead.size,
     ...(degraded ? { degraded: true, reason } : {}),
   };
 }

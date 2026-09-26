@@ -452,9 +452,22 @@ export function windowSince(root: string, path: string, limit = 25): string {
   const names = git("log", "--name-only", "--pretty=format:", `--since=${iso}`);
   const files = [...new Set(names.stdout.split("\n").map(l => l.trim()).filter(Boolean))].sort();
 
+  // A file edited after its header — the report's `+Nh after header` — was most likely
+  // reconciled by hand without --header, so it already absorbed some of the commits
+  // above. The header window stays the answer; this one says how many the last edit
+  // cannot have seen, so that reconcile reads as N behind once instead of every session.
+  const mtime = statSync(path).mtimeMs;
+  const later = mtime - cutoff > 60_000
+    ? git("rev-list", "--count", "HEAD", `--since=${clockIso(mtime)}`)
+    : null;
+  const edit = later?.status === 0
+    ? [`  since last edit ${clockIso(mtime)} (+${humanizeDelta(mtime - cutoff)} after header): ${plural(Number(later.stdout.trim()))}`]
+    : [];
+
   const shown = commits.slice(0, limit);
   const out = [
     `${plural(commits.length)} · ${files.length} file${files.length === 1 ? "" : "s"}${dirtyNote} since ${iso}`,
+    ...edit,
     ...shown.map(c => `  ${c}`),
     ...(commits.length > shown.length ? [`  +${commits.length - shown.length} older`] : []),
   ];

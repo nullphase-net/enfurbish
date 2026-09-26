@@ -100,11 +100,12 @@ One sentence on the most important thing to pick up.
 - Anything fragile or hard to reconstruct.
 ```
 
-Three authoring rules:
+Four authoring rules:
 
 - Say in words when an item is untested: "untested lead", "not yet run". No special prefix; `/next` reads items semantically.
 - Every measured fact names the artifact that produced it, inline: a result file, a commit sha, a `file.py:symbol`.
-- Verify any claim the item makes about the repo before writing it: counts, remaining budget, whether a proposed experiment is still feasible.
+- Verify any claim the item makes about the repo before writing it: counts, remaining budget, whether a proposed experiment is still feasible. A number this session measured an hour ago is not verified; re-run it now.
+- An item that waits on a condition ("do X once Y lands") says whether Y has already happened as of writing. An unattended session obeys the condition as written.
 
 **5.4 Write or remove.** Any items → write. Empty after the merge → `rm <cwd>/NEXT_SESSION.md` and note "removed (all resolved)" in the Handoff section.
 

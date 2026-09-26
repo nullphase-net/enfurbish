@@ -445,6 +445,28 @@ test("windowSince names the commits and files that landed after the header", () 
   expect(out).toContain("files: f.txt");
 });
 
+// A hand reconcile that skipped --header leaves the file newer than its header, and
+// the header window then re-counts, every session, commits the edit already absorbed.
+test("windowSince adds a labelled window from the file's last edit when it postdates the header", () => {
+  const root = repoWithCommits(COMMITS);
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, HANDOFF("2026-08-18T17:00:00-05:00"));
+  const edited = Date.parse("2026-08-18T18:30:00-05:00") / 1000;
+  utimesSync(p, edited, edited);
+  const lines = windowSince(root, p).split("\n");
+  expect(lines[0]).toContain("2 commits");
+  expect(lines[1]).toBe("  since last edit 2026-08-18T23:30:00Z (+1h 30m after header): 1 commit");
+});
+
+test("windowSince adds no second window when the file matches its header", () => {
+  const root = repoWithCommits(COMMITS);
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, HANDOFF("2026-08-18T17:00:00-05:00"));
+  const at = Date.parse("2026-08-18T17:00:30-05:00") / 1000;
+  utimesSync(p, at, at);
+  expect(windowSince(root, p)).not.toContain("since last edit");
+});
+
 // The other direction: a current handoff must read as an all-clear, not as silence.
 test("windowSince says 0 and says the handoff still describes HEAD", () => {
   const root = repoWithCommits(COMMITS);

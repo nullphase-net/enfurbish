@@ -32,9 +32,11 @@ Use when the user wants to pick up where the last session left off, or to re-con
    - **If the file says its open list lives in another tool, read the list from that tool.** Run the commands the file names; their output is the "Open threads" half of the briefing, and the file's own sections are the orientation half. A file that delegates its list and holds only prose is the designed shape there, not a stale stub. Briefing from the file alone is the failure this exists for: in every project that adopted a store, `/next` read the file, never consulted the tool, and the session started on a list the tool had already moved past.
    - Mention the wrap timestamp from the file header so the user knows how stale it is.
    - An item the last session flagged as untested is a hypothesis, not a finding. Present it as one — never as a settled result.
+   - So is an item that states a mechanism or a number with no artifact named — no file, commit or command behind it. The wrap is told to name one; when it did not, relay the item as a claim to check before acting on it, not as background (journal #628a80, 2026-09-14).
 
-4. **Ask the user which thread to pick up.**
-   - Don't start work yet. Wait for them to choose.
+4. **Ask the user which thread to pick up, unless the invocation already named one.**
+   - Invoked bare, don't start work yet. Wait for them to choose.
+   - Invoked with arguments (`/next finish the ledger merge`), they have chosen. Brief in one line — which file, how stale — then start on what they named. Asking again costs a round trip for an answer already given.
 
 ## What this skill does NOT do
 
@@ -43,7 +45,7 @@ Use when the user wants to pick up where the last session left off, or to re-con
 
 ## Edge cases
 
-- `+Nh after header` on a line means the file moved after its own `**Last wrapped:**` header was written — a hand edit, or a reconcile that never stamped (`--stamp` moves the header when it certifies new content). Trust the content over the header timestamp.
+- `+Nh after header` on a line means the file moved after its own `**Last wrapped:**` header was written — a hand edit, or a reconcile that never stamped (`--stamp` moves the header when it certifies new content). Trust the content over the header timestamp. `--since` then prints a second line, `since last edit`, counting only the commits the edit cannot have seen; the header window above it re-counts ones the edit may already describe.
 - `stamp:edited` means the file no longer matches the stamp `/wrap` wrote: a hand edit, a mid-session reconcile that never re-stamped, or a session that died before wrapping. Worth mentioning; hand-written items are usually the most load-bearing ones. `stamp:assistant` means it is exactly as the last wrap left it.
 - If `NEXT_SESSION.md` exists but is empty or has no `## Open threads` items, treat it as "stale stub" — tell the user it exists but holds nothing actionable. A file that says its open list lives in another tool is not a stub; step 3 reads the list from there.
 - `oversize:NNKB` on the report line means the file is past 16 KB. Summarize aggressively rather than reading the whole thing back. Long handoff files are a smell; flag it. Read the "Don't forget" section in full regardless — that section is where hard-won gotchas live, and a 2026-08-16 session spent two days re-deriving a fact staged there.

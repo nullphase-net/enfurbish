@@ -153,6 +153,23 @@ test("parseTranscript records files_edited and files_read_count", async () => {
   expect(r.files_read_count).toBe(1);
 });
 
+// Named for files and documented as "number of files read", but it counted Read
+// calls, which tools.Read.calls already reports; files_edited beside it dedupes.
+test("files_read_count counts distinct files, not Read calls", async () => {
+  const f = join(mkdtempSync(join(tmpdir(), "wrap-reads-")), "x.jsonl");
+  const read = (i: number, path: string) => JSON.stringify({
+    type: "assistant",
+    timestamp: `2026-05-10T17:00:0${i}.000Z`,
+    cwd: "/x",
+    sessionId: "00000000-0000-0000-0000-000000000000",
+    message: { role: "assistant", content: [{ type: "tool_use", id: `r${i}`, name: "Read", input: { file_path: path } }] },
+  });
+  writeFileSync(f, [read(1, "/a.ts"), read(2, "/a.ts"), read(3, "/b.ts")].join("\n") + "\n");
+  const r = await parseTranscript(f);
+  expect(r.files_read_count).toBe(2);
+  expect(r.tools.Read.calls).toBe(3);
+});
+
 test("parseTranscript counts user vs model turns", async () => {
   const r = await parseTranscript(FIXTURE);
   expect(r.turn_count.user).toBeGreaterThan(0);
