@@ -4,7 +4,7 @@
 
 ### 2. Pull cross-session journal context
 
-For each tool key in `tools` and `mcp` from the scan, what prior wraps said about it:
+For each name in the scan's `skills_invoked`, each key in `mcp`, each event in `hooks`, and each project tool you ran through Bash, what prior wraps said about it. Not the `tools` map: under auto mode it is mostly Bash and Skill, which step 4 forbids journaling, so the two steps would disagree about what the session's tooling was.
 
 ```bash
 bun run "<skill-base-dir>/../../lib/journal-append.ts" --journal ~/.claude/tooling-journal.md --recent <toolname>
@@ -18,7 +18,7 @@ Then the standing backlog, once:
 bun run "<skill-base-dir>/../../lib/journal-append.ts" --journal ~/.claude/tooling-journal.md --actions
 ```
 
-Three blocks: `closed:` first, the newest open actions, then `stale:` with the oldest actions nobody has retired and, under the label, what to do with them. Every open row carries a `#id`. The `closed` array it names is the one in step 4's entry, and a close retires only the ids it names. A head row marked `(recurring, unmoved)` or `(10th repetition)` gets the same answer as a stale one: open, done, or never, not an eleventh log line.
+Three blocks: `closed:` first, the newest open actions, then `stale:` with the oldest actions nobody has retired and, under the label, what to do with them. Every open row carries a `#id` and, in brackets, the project whose wrap logged it: a project-local tool's action can only be judged from that project. `--full` prints each action's whole text. The `closed` array it names is the one in step 4's entry, and a close retires only the ids it names. A head row marked `(recurring, unmoved)` or `(10th repetition)` gets the same answer as a stale one: open, done, or never, not an eleventh log line.
 
 No journal yet → both commands report zero; the first append creates it with a header.
 
@@ -82,7 +82,7 @@ cat <<'JOURNAL' | bun run "<skill-base-dir>/../../lib/journal-append.ts" --journ
 JOURNAL
 ```
 
-`usage`, `notes`, `closed` and `action` are optional. One `closed` string may retire several rows of the same idea. The append prints what each close retired and flags any that retired nothing; a flagged one leaves its action open for the next wrap, so note it in the retro. Omit `closed` on the wraps that retire nothing (most of them), and omit `action` when there genuinely isn't one rather than writing "none". Raw markdown on stdin still appends verbatim, for a retroactive or hand-written entry; JSON is the default because a format the model reassembles from memory drifts. Empty stdin is a no-op.
+`usage`, `notes`, `closed` and `action` are optional. One `closed` string may retire several rows of the same idea. The append prints what each close retired and flags any that retired nothing; a flagged one leaves its action open for the next wrap, so note it in the retro. Omit `closed` on the wraps that retire nothing (most of them), and omit `action` when there genuinely isn't one rather than writing "none" (an action that says none is written as a note, and the append says so). Raw markdown on stdin still appends verbatim, for a retroactive or hand-written entry; JSON is the default because a format the model reassembles from memory drifts. Empty stdin is a no-op.
 
 **Verdict:** `helped` — output the session actually used. `hurt` — wasted time or tokens, produced wrong info, or required correction. `neutral` — ran without error and without observable signal either way.
 

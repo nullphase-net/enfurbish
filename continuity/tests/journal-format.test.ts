@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import {
-  findActions, findClosed, formatEntry, matching, parseSections, reportActions, reportRecent,
+  findActions, findClosed, formatEntry, matching, noneActions, parseSections, reportActions, reportRecent,
 } from "../lib/journal-append";
 
 // The journal's shape used to live only in wrap/SKILL.md prose. These pin the
@@ -33,13 +33,32 @@ test("formatEntry uses the separator already on disk", () => {
 test("formatEntry omits the Action line when there is no action", () => {
   const secs = parseSections(formatEntry(ENTRY));
   expect(secs.map(s => s.tool)).toEqual(["continuity scan.ts", "pastiche CLI"]);
-  expect(findActions(secs)).toHaveLength(1);
+  expect(findActions(secs)).toHaveLength(0);
 });
 
 test("what formatEntry writes, parseSections reads back", () => {
-  const secs = parseSections(formatEntry(ENTRY));
+  const e = { ...ENTRY, tools: [{ ...ENTRY.tools[0], action: "count slash commands once." }] };
+  const secs = parseSections(formatEntry(e));
   expect(secs[0].entry).toBe("2026-08-18T21:00:00-05:00");
-  expect(findActions(secs)[0].text).toBe("none — closed after six loggings.");
+  expect(secs[0].slug).toBe("enfurbish");
+  expect(findActions(secs)[0].text).toBe("count slash commands once.");
+});
+
+// An action whose text is "none" was 18 open rows on 2026-09-26, each one a wrap
+// saying there was nothing to do. The text is kept, as a note, because some carry
+// a real observation after the "none" (#b6480a: "none. The check rule is doing
+// disproportionate work; consider..."), so dropping it would lose that.
+test("an action that says none is written as a note, and no reader finds an action", () => {
+  const out = formatEntry(ENTRY);
+  expect(out).toContain("- none — closed after six loggings.");
+  expect(out).not.toContain("Action: none");
+  expect(findActions(parseSections(out))).toHaveLength(0);
+});
+
+test("noneActions names the tools whose action said none, and only those", () => {
+  expect(noneActions(ENTRY)).toEqual(["continuity scan.ts"]);
+  expect(noneActions({ ...ENTRY, tools: [{ name: "t", verdict: "helped", action: "nonetheless, split it" }] }))
+    .toEqual([]);
 });
 
 // --- the drift the readers exist to survive --------------------------------
@@ -77,6 +96,30 @@ test("Action lines are found through every qualifier and bold variant", () => {
   expect(acts.map(a => a.qualifier))
     .toEqual(["", "(recurring, unmoved)", "(new)", "(10th repetition)"]);
   expect(acts[2].text).toBe("put the graphify binary on a PATH non-interactive shells see.");
+});
+
+// 53 bullets in the real journal carry their action after a sentence, inside the
+// bullet ("…at 0 calls. Action (third repeat): scope it out."): the raw-markdown
+// era, before formatEntry owned the shape. The start-of-bullet pattern never saw
+// them, so they could be neither read nor retired.
+const MIDLINE = [
+  "## 2026-08-17T00:00:00Z  •  ocellus  •  aaaa1111",
+  "",
+  "### shodh-memory (MCP)  •  verdict: neutral",
+  "- Fourth consecutive session at 0 calls. Action (third repeat, escalating): scope it out.",
+  "- Stale banner persisted. **Action (recurring, unmoved across 8+ wraps):** run install.",
+  "- The Action: heading in the skill is prose, not a sentence start.",
+  "- Closed: #abcdef -- done. Action: text inside a close is not an action.",
+  "- Action: a start-of-bullet action reads exactly as before.",
+].join("\n");
+
+test("an Action that starts a sentence mid-bullet is an action; prose and closes are not", () => {
+  const acts = findActions(parseSections(MIDLINE));
+  expect(acts.map(a => [a.qualifier, a.text])).toEqual([
+    ["(third repeat, escalating)", "scope it out."],
+    ["(recurring, unmoved across 8+ wraps)", "run install."],
+    ["", "a start-of-bullet action reads exactly as before."],
+  ]);
 });
 
 test("a section with no Action contributes none", () => {
@@ -224,4 +267,48 @@ test("reportActions says nothing about closed when nothing is closed", () => {
   expect(out).toContain("1 open of 1");
   expect(out).not.toContain("closed");
   expect(out).not.toContain("open:");
+});
+
+// --- the project a row came from --------------------------------------------
+// The backlog is global, but a project-local tool's action can only be acted on in
+// that project: 21 of 212 reviewed on 2026-09-26 were for tools like
+// exotic-geometry-framework's tools/metric_diagnostic.py. The row says where it came
+// from. Both header shapes are on disk: `  •  ` since formatEntry, `  -  ` before.
+
+const TWO_SHAPES = [
+  "## 2026-05-10T20:30:00-04:00  -  old-proj  -  0dfb260f",
+  "",
+  "### graphify  -  3 calls  -  verdict: helped",
+  "- Action: old-shape header.",
+  "",
+  "## 2026-09-24T10:00:00Z  •  example.net  •  bbbb2222",
+  "",
+  "### loop (skill)  •  verdict: helped",
+  "- Action: new-shape header.",
+].join("\n");
+
+test("every row names the project its entry came from, under both header shapes", () => {
+  const secs = parseSections(TWO_SHAPES);
+  expect(secs.map(s => s.slug)).toEqual(["old-proj", "example.net"]);
+  const out = reportActions(secs, undefined, 20);
+  expect(out).toMatch(/#[0-9a-f]{6}  \[old-proj\] .*old-shape header/);
+  expect(out).toMatch(/#[0-9a-f]{6}  \[example\.net\] .*new-shape header/);
+});
+
+test("the slug does not move an old-shape entry's id: entry keeps its raw text", () => {
+  // actionId hashes the entry string. Re-parsing the old `  -  ` header would have
+  // renumbered every action written before formatEntry, and orphaned their closes.
+  expect(parseSections(TWO_SHAPES)[0].entry).toBe("2026-05-10T20:30:00-04:00  -  old-proj  -  0dfb260f");
+});
+
+// --- full text ---------------------------------------------------------------
+
+test("rows clip action text at 100 chars by default and print it whole with full", () => {
+  const long = "x".repeat(150) + " END";
+  const secs = parseSections(formatEntry({
+    timestamp: "2026-09-26T10:00:00Z", slug: "p", session: "s", arc: "a",
+    tools: [{ name: "t", verdict: "helped", action: long }],
+  }));
+  expect(reportActions(secs, undefined, 20)).not.toContain("END");
+  expect(reportActions(secs, undefined, 20, true)).toContain(long);
 });

@@ -67,6 +67,19 @@ export type Entry = {
   tools?: ToolNote[];
 };
 
+/**
+ * An action that says "none" is a wrap reporting there was nothing to do. Written as
+ * an Action it was an open row: 18 of them on 2026-09-26, each re-read by every later
+ * wrap. It is kept as a note, not dropped, because some carry a real observation
+ * after the "none" (#b6480a).
+ */
+const NONE = /^none\b/i;
+
+/** Tools whose `action` said none — the append reports them while the writer is listening. */
+export function noneActions(e: Entry): string[] {
+  return (e.tools ?? []).filter(t => t.action && NONE.test(t.action.trim())).map(t => t.name);
+}
+
 /** Render one wrap's journal entry. The single place the on-disk shape is written. */
 export function formatEntry(e: Entry): string {
   const out = [
@@ -77,9 +90,10 @@ export function formatEntry(e: Entry): string {
   for (const t of e.tools ?? []) {
     const usage = t.usage ? `${SEP}${t.usage}` : "";
     out.push("", `### ${t.name}${usage}${SEP}verdict: ${t.verdict}`);
-    for (const n of t.notes ?? []) out.push(`- ${n}`);
+    const none = !!t.action && NONE.test(t.action.trim());
+    for (const n of [...(t.notes ?? []), ...(none ? [t.action!] : [])]) out.push(`- ${n}`);
     for (const c of t.closed ?? []) out.push(`- Closed: ${c}`);
-    if (t.action) out.push(`- Action: ${t.action}`);
+    if (t.action && !none) out.push(`- Action: ${t.action}`);
   }
   return out.join("\n") + "\n";
 }
@@ -91,22 +105,30 @@ export type Section = {
   heading: string;
   /** Just the tool name — the heading up to the first separator. This is the part that drifts. */
   tool: string;
-  /** Timestamp of the `## ` entry this section belongs to. */
+  /**
+   * Timestamp of the `## ` entry this section belongs to. For an entry written with
+   * the pre-formatEntry `  -  ` separator this is the whole header line: action ids
+   * hash it, so re-parsing it would renumber every old action and orphan its closes.
+   */
   entry: string;
+  /** The project the entry came from, under either header separator; "" if absent. */
+  slug: string;
   body: string[];
 };
 
 export function parseSections(text: string): Section[] {
   const out: Section[] = [];
   let entry = "";
+  let slug = "";
   let cur: Section | null = null;
   for (const line of text.split("\n")) {
     if (line.startsWith("## ")) {
       entry = line.slice(3).split(SEP)[0].trim();
+      slug = line.slice(3).split(/\s+[•-]\s+/)[1]?.trim() ?? "";
       cur = null;
     } else if (line.startsWith("### ")) {
       const heading = line.slice(4).trim();
-      cur = { heading, tool: heading.split(SEP)[0].trim(), entry, body: [] };
+      cur = { heading, tool: heading.split(SEP)[0].trim(), entry, slug, body: [] };
       out.push(cur);
     } else if (cur) {
       cur.body.push(line);
@@ -134,10 +156,19 @@ export function matching(secs: Section[], tool?: string): Section[] {
  */
 const ACTION = /^-\s*\*{0,2}Action\b\s*(\([^)]*\))?\s*\*{0,2}\s*:\s*\*{0,2}\s*(.*)$/;
 
+/**
+ * The same, starting a sentence inside a bullet: "…at 0 calls. Action (third
+ * repeat): scope it out." 53 raw-markdown-era bullets carry their action this way
+ * and were invisible to `--actions`, so they could be neither read nor retired.
+ * Tried only when ACTION misses, so no start-of-bullet line changes text or id. A
+ * `Closed:` bullet is never an action, whatever it quotes.
+ */
+const MIDLINE_ACTION = /^-\s(?!\s*\*{0,2}Closed\b).*?[.!?)]\s+\*{0,2}Action\b\s*(\([^)]*\))?\s*\*{0,2}\s*:\s*\*{0,2}\s*(.*)$/;
+
 /** `- Closed: …`, `- **Closed (retired):** …` — the same shape, loose for the same reason. */
 const CLOSED = /^-\s*\*{0,2}Closed\b\s*(\([^)]*\))?\s*\*{0,2}\s*:\s*\*{0,2}\s*(.*)$/;
 
-export type Action = { entry: string; tool: string; qualifier: string; text: string; id: string };
+export type Action = { entry: string; slug: string; tool: string; qualifier: string; text: string; id: string };
 
 /**
  * Six hex of a content hash, so it needs no stored counter and appending an entry
@@ -153,21 +184,22 @@ function idsIn(text: string): string[] {
   return [...text.matchAll(/#([0-9a-f]{6})\b/g)].map(m => m[1]);
 }
 
-function collectLines(secs: Section[], re: RegExp): Action[] {
+function collectLines(secs: Section[], ...res: RegExp[]): Action[] {
   const out: Action[] = [];
   for (const s of secs) {
     for (const line of s.body) {
-      const m = re.exec(line);
+      let m: RegExpExecArray | null = null;
+      for (const re of res) if ((m = re.exec(line))) break;
       if (!m) continue;
       const text = m[2].trim();
-      out.push({ entry: s.entry, tool: s.tool, qualifier: m[1] ?? "", text, id: actionId(s.entry, s.tool, text) });
+      out.push({ entry: s.entry, slug: s.slug, tool: s.tool, qualifier: m[1] ?? "", text, id: actionId(s.entry, s.tool, text) });
     }
   }
   return out;
 }
 
 export function findActions(secs: Section[]): Action[] {
-  return collectLines(secs, ACTION);
+  return collectLines(secs, ACTION, MIDLINE_ACTION);
 }
 
 export function findClosed(secs: Section[]): Action[] {
@@ -184,9 +216,10 @@ function spellings(secs: Section[]): number {
 }
 
 /** Open rows carry the `#id` a close names; closed rows already quote the ids they retire. */
-function row(a: Action, withId = true): string {
+function row(a: Action, withId = true, full = false): string {
   const id = withId ? `#${a.id}  ` : "";
-  return `${a.entry.slice(0, 10)}  ${id}${clip(a.tool, 34).padEnd(34)}  ${a.qualifier ? a.qualifier + " " : ""}${clip(a.text, 100)}`;
+  const slug = a.slug ? `[${clip(a.slug, 24)}] ` : "";
+  return `${a.entry.slice(0, 10)}  ${id}${slug}${clip(a.tool, 34).padEnd(34)}  ${a.qualifier ? a.qualifier + " " : ""}${full ? a.text : clip(a.text, 100)}`;
 }
 
 /**
@@ -209,7 +242,7 @@ const STALE_ROWS = 5;
 const STALE_GUIDANCE =
   "  answer each: still open / already done / never going to happen. Retire it through the closed array of this wrap's entry, naming its #id, or it comes back next session.";
 
-export function reportActions(secs: Section[], tool: string | undefined, limit: number): string {
+export function reportActions(secs: Section[], tool: string | undefined, limit: number, full = false): string {
   const hit = matching(secs, tool);
   // Retirement is global: a close is written under whatever heading the wrap was
   // on, which is rarely the heading of the action it retires.
@@ -242,13 +275,13 @@ export function reportActions(secs: Section[], tool: string | undefined, limit: 
     head,
     ...(done.length ? [
       "closed:",
-      ...shownDone.map(c => row(c, false)),
+      ...shownDone.map(c => row(c, false, full)),
       ...(done.length > shownDone.length ? [`+${done.length - shownDone.length} older closed`] : []),
       "open:",
     ] : []),
-    ...recent.map(a => row(a)),
+    ...recent.map(a => row(a, true, full)),
     ...(hidden > 0 ? [`+${hidden} older`] : []),
-    ...(stale.length ? ["stale:", STALE_GUIDANCE, ...stale.map(a => row(a))] : []),
+    ...(stale.length ? ["stale:", STALE_GUIDANCE, ...stale.map(a => row(a, true, full))] : []),
   ].join("\n");
 }
 
@@ -305,9 +338,10 @@ async function readStdin(): Promise<string> {
 
 const USAGE = `usage: journal-append.ts --journal <path> [mode]
        (no mode)                   append: an Entry as JSON on stdin, or raw markdown
-       --actions [--tool <name>]   the improvement backlog: closed first, newest
+       --actions [<name>]          the improvement backlog: closed first, newest
                                    open next, oldest still-open under 'stale:' with
-                                   what to do about them
+                                   what to do about them; <name> (or --tool <name>)
+                                   filters to one tool, --full prints whole text
        --recent <name>             what prior wraps said about one tool
        --limit <n>                 cap rows (default 20 actions / 5 sections)`;
 
@@ -332,7 +366,9 @@ if (import.meta.main) {
     const secs = parseSections(read());
     process.stdout.write(("recent" in args
       ? reportRecent(secs, args.recent, Number.isFinite(limit) ? limit : 5)
-      : reportActions(secs, args.tool || undefined, Number.isFinite(limit) ? limit : 20)) + "\n");
+      // `--actions ponytail` parses "ponytail" as the value of --actions. Read only
+      // --tool and it vanished: the whole backlog, exit 0, no scope in the head.
+      : reportActions(secs, args.tool || args.actions || undefined, Number.isFinite(limit) ? limit : 20, "full" in args)) + "\n");
     process.exit(0);
   }
 
@@ -344,9 +380,12 @@ if (import.meta.main) {
   // JSON in means this file renders the shape. Raw markdown still appends
   // verbatim — retroactive and hand-written entries have to stay possible.
   let entry = raw;
+  let nones: string[] = [];
   if (raw.trimStart().startsWith("{")) {
     try {
-      entry = formatEntry(JSON.parse(raw) as Entry);
+      const parsed = JSON.parse(raw) as Entry;
+      entry = formatEntry(parsed);
+      nones = noneActions(parsed);
     } catch (e: any) {
       process.stderr.write(`journal-append: stdin looked like JSON but ${e?.message ?? e}\n`);
       process.exit(2);
@@ -361,7 +400,10 @@ if (import.meta.main) {
   const sep = base.endsWith("\n") ? "" : "\n";
   const next = base + sep + entry + (entry.endsWith("\n") ? "" : "\n");
 
-  const closes = reportCloses(parseSections(existing), parseSections(entry));
+  const closes = [
+    ...reportCloses(parseSections(existing), parseSections(entry)),
+    ...nones.map(n => `${n}: action said none, written as a note — omit action when there is none`),
+  ];
 
   const tmp = journal + "." + process.pid + ".tmp";
   try {

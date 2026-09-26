@@ -111,6 +111,17 @@ test("--recent with a real tool name still reports", () => {
   expect(r.stdout).toContain("pastiche");
 });
 
+// `--actions ponytail` parsed "ponytail" as the value of --actions, and the report
+// read only --tool: the whole backlog came back, exit 0, with no scope in the head.
+// A reader has no way to tell that from a correct answer. Both directions.
+test("--actions <name> filters the backlog the way --tool does", () => {
+  const r = cli(seeded(), "--actions", "continuity");
+  expect(r.status).toBe(0);
+  expect(r.stdout).toContain('"continuity" matches');
+  expect(r.stdout).not.toContain("do the thing");
+  expect(cli(seeded(), "--actions", "pastiche").stdout).toContain("do the thing");
+});
+
 test("--actions takes no value and is unaffected by the guard", () => {
   const r = cli(seeded(), "--actions");
   expect(r.status).toBe(0);
@@ -205,7 +216,7 @@ test("a Closed line naming an action's #id retires it from every block, and only
   expect(r.status).toBe(0);
   expect(r.stdout).not.toContain("oldest idea");
   expect(openRows(r.stdout).map(l => l.replace(ROW, "").replace(/\s+/g, " ").trim()))
-    .toEqual(["toolC newest idea", "toolB middle idea"]);
+    .toEqual(["[proj] toolC newest idea", "[proj] toolB middle idea"]);
   expect(r.stdout).toContain("shipped in 0.10.0");   // the close itself still shows
   expect(r.stdout.split("\n")[0]).toMatch(/^2 open of 3/);
 });
@@ -276,4 +287,25 @@ test("a close naming the same #id twice counts it once", () => {
   const id = idOf(cli(j, "--actions").stdout, "oldest idea");
   const res = run(j, entry([`#${id} done`, `#${id} and again`]));
   expect(res.stdout.trim()).toBe(`retired 1: #${id}`);
+});
+
+test("appending an action that says none reports it was written as a note", () => {
+  const j = seeded();
+  const entry = JSON.stringify({
+    timestamp: "2026-09-26T10:00:00Z", slug: "p", session: "s", arc: "a",
+    tools: [{ name: "gl", verdict: "helped", action: "none." }, { name: "t", verdict: "helped", action: "real one" }],
+  });
+  const r = run(j, entry);
+  expect(r.status).toBe(0);
+  expect(r.stdout).toContain("gl: action said none, written as a note");
+  expect(r.stdout).not.toContain("t: action");
+});
+
+test("--full prints each action whole", () => {
+  const j = seeded();
+  const long = "y".repeat(140) + " TAIL";
+  run(j, JSON.stringify({ timestamp: "2026-09-26T10:00:00Z", slug: "p", session: "s", arc: "a",
+    tools: [{ name: "t", verdict: "helped", action: long }] }));
+  expect(cli(j, "--actions").stdout).not.toContain("TAIL");
+  expect(cli(j, "--actions", "--full").stdout).toContain(long);
 });
