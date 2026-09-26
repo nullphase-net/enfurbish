@@ -108,6 +108,32 @@ describe("--seen / --mark", () => {
     expect(readFileSync(c.ledger, "utf8")).toBe(seed);
   });
 
+  // --seen said "already current" for two items the session's due list showed
+  // last used 2026-09-05, and the output could not say whether another session
+  // had stamped them or the list and the ledger disagreed (journal, 2026-09-24).
+  // The line on disk answers that; which session wrote it is recorded nowhere.
+  test("already current shows the line it found, stamp included", () => {
+    const long = "rechazar / el rechazo — to reject / the rejection (la red rechazó el SMS) | 2026-08-12";
+    const c = fixture(`- es: ${long} | seen: ${NOW}\n`);
+    const said: string[] = [];
+    main(["--seen", "rechazar"], c, s => said.push(s));
+    expect(said).toEqual([`already current: "rechazar" -> ${NOW}`, `  have: es: ${long} | seen: ${NOW}`]);
+  });
+
+  // "already current" was a claim about the stamp, made by comparing bytes: a
+  // line with no seen: field never changed, so it read as current while the due
+  // list kept its introduce date. Both restamp callers, --seen and a dupe --add.
+  test("a line with no seen: is restamped, not reported current", () => {
+    const seed = "- es: el puerto — port | 2026-02-02\n";
+    for (const args of [["--seen", "el puerto"], ["--add", "es", "el puerto — port"]]) {
+      const c = fixture(seed);
+      const said: string[] = [];
+      main(args, c, s => said.push(s));
+      expect(said.join("\n")).not.toContain("already");
+      expect(readFileSync(c.ledger, "utf8")).toBe(`- es: el puerto — port | 2026-02-02 | seen: ${NOW}\n`);
+    }
+  });
+
   // Ledger parentheticals carry pronunciation notes, so a needle built as
   // "<script> (<romanization>)" is not a substring of the line. Until the term
   // key dropped the parenthetical this read "no match" plus a near: hint.
@@ -533,5 +559,38 @@ describe("--add duplicate detection", () => {
     const text = readFileSync(c.ledger, "utf8");
     expect(text).toContain("el hilo — thread");
     expect(text).toContain(`la red — network | 2026-02-01 | ✓ | seen: ${NOW}`);
+  });
+});
+
+// Three outputs a session reads to check a write, each of which dropped the part
+// that answers the check (tooling-journal review, 2026-09-26).
+describe("write output carries the line it is about", () => {
+  const LONG = "rechazar / el rechazo — to reject / the rejection (la red rechazó el SMS) | 2026-08-12 | seen: 2026-08-12";
+
+  test("a dupe --add prints its have: line whole, stamp included", () => {
+    // Cut at 96 chars, it lost the seen: stamp on 305 of 668 real ledger lines.
+    const c = fixture(`- es: ${LONG}\n`);
+    const out: string[] = [];
+    main(["--add", "es", "rechazar / el rechazo — to refuse"], c, s => void out.push(s));
+    expect(out.find(l => l.startsWith("  have:"))).toEndWith(`seen: ${NOW}`);
+  });
+
+  test("a --seen that changes the stamp names the line it landed on", () => {
+    // A fragment that resolves to one term is only checkable if the output names it.
+    const c = fixture(SEED);
+    const out: string[] = [];
+    main(["--seen", "teuk"], c, s => void out.push(s));
+    expect(out).toEqual([`restamped "teuk" -> ${NOW}`, `  now: km: ទឹក (teuk) — water | 2026-01-01 | seen: ${NOW}`]);
+  });
+
+  test("--due marks an untagged item [untagged] and brackets a tagged one's subject", () => {
+    const c = fixture("- km: ទឹក (teuk) — water | 2026-01-01 | subj: family | seen: 2026-01-01\n" +
+      "- es: la red — network | 2026-02-01 | seen: 2026-02-01\n");
+    const out: string[] = [];
+    main(["--due"], c, s => void out.push(s));
+    expect(out).toEqual([
+      "2026-01-01  km: ទឹក (teuk) — water  [family]",
+      "2026-02-01  es: la red — network  [untagged]",
+    ]);
   });
 });

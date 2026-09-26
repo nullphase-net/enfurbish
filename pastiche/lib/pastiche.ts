@@ -165,6 +165,15 @@ export function recordSurfaced(s: Surfaced, shown: Entry[], sessionId: string, d
   return next;
 }
 
+/**
+ * The shown items `recordSurfaced` just sent to the back: their rotation date
+ * moved. The hook names them, since the sidecar's post-rotation `sessions: []`
+ * read to a session as a bug until it read the source.
+ */
+export function rotatedBy(before: Surfaced, after: Surfaced, shown: Entry[]): Entry[] {
+  return shown.filter(e => rotation(e, after) > rotation(e, before));
+}
+
 /** Missing, unreadable or malformed reads as empty: the counts are a hint, never a gate. */
 export function loadSurfaced(path?: string): Surfaced {
   if (!path || !existsSync(path)) return {};
@@ -192,12 +201,16 @@ export function restamp(text: string, needle: string, date: string): string {
   return restampLines(text, matchingLines(text, needle), date);
 }
 
-/** Rewrite `seen:` to `date` on exactly `lines`: `--add`'s dupes, one language's. */
+/**
+ * Rewrite `seen:` to `date` on exactly `lines`: `--add`'s dupes, one language's.
+ * A hand-written line with no `seen:` gets one, as `mark()` and `tag()` do: left
+ * alone it read as "already current" while the due list kept its introduce date.
+ */
 function restampLines(text: string, lines: Iterable<string>, date: string): string {
   const hit = new Set(lines);
   return text
     .split("\n")
-    .map(l => (hit.has(l) ? l.replace(SEEN, `seen: ${date}`) : l))
+    .map(l => (!hit.has(l) ? l : SEEN.test(l) ? l.replace(SEEN, `seen: ${date}`) : `${l} | seen: ${date}`))
     .join("\n");
 }
 
@@ -318,24 +331,32 @@ export function formatCorrection(wrong: string, right: string, rule: string): st
 export function buildContext(opts: {
   cfg: Config;
   due: Entry[];
+  /** The due items this session's showing rotated to the back (`rotatedBy`). */
+  rotated?: Entry[];
   notes: string;
   pluginRoot: string;
 }): string {
-  const { cfg, due, notes, pluginRoot } = opts;
+  const { cfg, due, rotated = [], notes, pluginRoot } = opts;
   const langs = cfg.languages.length
     ? cfg.languages.map(l => `- ${l.name} (${l.code}) — ${l.domains}`).join("\n")
     : "- (none configured — see the plugin README)";
   const dueList = due.length
     ? due.map(e =>
-        `  - ${e.code}: ${e.term}${e.subject ? `  [${e.subject}]` : ""}  [last used ${e.seen}]`,
+        `  - ${e.code}: ${e.term}  [${e.subject || "untagged"}]  [last used ${e.seen}]`,
       ).join("\n")
     : "  (nothing due yet — the ledger is empty or not created; the first terms you\n" +
       "   introduce start it)";
+  const rotatedLine = rotated.length
+    ? `\n  rotated to back (shown in ${DORMANT_AFTER} sessions since last use): ` +
+      rotated.map(e => `${e.code}: ${headOf(e.term)}`).join(", ")
+    : "";
   const freshRule = cfg.fresh > 0
     ? `\nIntroduce up to ${cfg.fresh} new term${cfg.fresh === 1 ? "" : "s"} per session, drawn from what the work is
 actually about. Append each to the ledger. This budget is separate from the due
 list — reinforcement never crowds it out. No natural opening, though, means
-spend less; filler is worse than silence.\n`
+spend less; filler is worse than silence. A hunch that they already have a term is
+no reason to withhold it: --add restamps a repeat rather than duplicating it, so
+adding one costs nothing and skipping one can cost them the word.\n`
     : "";
 
   return `# pastiche — ambient language infusion
@@ -356,9 +377,9 @@ budget already uses: does this session's work touch the term's subject.
 
 The bracket after a due term IS that subject — [rf, hardware], [family]. Read it
 and answer the test; don't re-derive the subject from the gloss when the line already
-says it. An item with no bracket is untagged, not subject-free: derive it as before,
-and tag it with --tag once you know. Tag what you add, too — an untagged addition is
-the next session re-deriving what this one already knew.
+says it. [untagged] means nobody has tagged it yet, not that it has no subject: derive
+it as before, and tag it with --tag once you know. Tag what you add, too — an untagged
+addition is the next session re-deriving what this one already knew.
 
 A term fits only where its gloss fits. A due word that looks like the English word
 your sentence needs but glosses differently is a false friend: the shape is the
@@ -386,7 +407,7 @@ ${notes}
 Ledger: ${cfg.ledger}
 
 Due for re-surfacing (stalest first):
-${dueList}
+${dueList}${rotatedLine}
 
 Write the ledger with these, never by editing the file — they own the format:
   P=${join(pluginRoot, "lib", "pastiche.ts")}
@@ -528,10 +549,16 @@ export function main(
     const after = fn(before, needle, arg);
     const n = hits.length > 1 ? ` (${hits.length} lines)` : "";
     // Worded as the success it is: the state asked for is the state on disk.
-    // "nothing to change" read to sessions as a failure.
-    if (before === after) return out(`already current: ${JSON.stringify(needle)} -> ${arg}${n}`), 0;
+    // "nothing to change" read to sessions as a failure. The line itself goes out
+    // with it, whole — its stamp is at the end — so a due list that disagrees can
+    // be checked against the disk. Which session wrote the stamp is not recorded.
+    if (before === after) {
+      return out(`already current: ${JSON.stringify(needle)} -> ${arg}${n}`), out(`  have: ${hits[0].slice(2)}`), 0;
+    }
     writeAtomic(cfg.ledger, after);
-    return out(`${verb} ${JSON.stringify(needle)} -> ${arg}${n}`), 0;
+    // The line it landed on: a fragment that resolves to one term (`teuk`) is only
+    // checkable if the output names the term it resolved to.
+    return out(`${verb} ${JSON.stringify(needle)} -> ${arg}${n}`), out(`  now: ${fn(hits[0], needle, arg).slice(2)}`), 0;
   };
 
   if (flag === "--path") return out(cfg.ledger), 0;
@@ -602,7 +629,8 @@ export function main(
         const state = after === text ? "already" : "restamped";
         dupes.push(
           `dupe: ${headOf(b)} ×${hits.length} — ${state} ${date}`,
-          `  have: ${restampLines(hits[0], hits, date).slice(2, 96)}`,
+          // Whole: the stamp is at the end, and 305 of 668 real lines ran past a 96-char cut.
+          `  have: ${restampLines(hits[0], hits, date).slice(2)}`,
         );
         text = after;
         continue;
@@ -634,7 +662,7 @@ export function main(
   if (!Number.isFinite(n)) return usage();
   const entries = parseLedger(text);
   for (const e of stalest(entries, n, loadSurfaced(cfg.surfaced))) {
-    out(`${e.seen}  ${e.code}: ${e.term}${e.subject ? `  [${e.subject}]` : ""}`);
+    out(`${e.seen}  ${e.code}: ${e.term}  [${e.subject || "untagged"}]`);
   }
   const hidden = entries.length - Math.min(n, entries.length);
   if (hidden > 0) out(`+${hidden} fresher`);

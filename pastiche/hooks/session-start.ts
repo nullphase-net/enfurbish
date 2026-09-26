@@ -3,8 +3,8 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
-  buildContext, loadConfig, loadNotes, loadSurfaced, parseLedger, recordSurfaced, saveSurfaced,
-  stalest, today,
+  buildContext, loadConfig, loadNotes, loadSurfaced, parseLedger, recordSurfaced, rotatedBy,
+  saveSurfaced, stalest, today, type Entry,
 } from "../lib/pastiche";
 
 function debugLog(line: string) {
@@ -40,14 +40,17 @@ export function buildOutput(pluginRoot: string, sessionId: string | null = null)
   // Re-injecting after a compaction is the point (vocabulary the model can't see
   // is vocabulary it can't use), so there is no re-fire suppression here; the
   // count dedupes on session_id instead.
+  let rotated: Entry[] = [];
   if (sessionId && cfg.surfaced) {
     try {
-      saveSurfaced(cfg.surfaced, recordSurfaced(surfaced, due, sessionId, today()));
+      const next = recordSurfaced(surfaced, due, sessionId, today());
+      saveSurfaced(cfg.surfaced, next);
+      rotated = rotatedBy(surfaced, next, due); // only once saved: an unsaved rotation did not happen
     } catch (e) {
       debugLog(`surfaced not saved: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  return buildContext({ cfg, due, notes: loadNotes(pluginRoot, cfg), pluginRoot });
+  return buildContext({ cfg, due, rotated, notes: loadNotes(pluginRoot, cfg), pluginRoot });
 }
 
 /**

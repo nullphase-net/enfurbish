@@ -252,6 +252,15 @@ describe("buildContext", () => {
     expect(off).not.toContain("Introduce up to");
   });
 
+  // A dupe --add restamps (0.6.2), so withholding a term on a hunch that a
+  // ~668-line ledger already holds it saves nothing and can cost the word.
+  test("says a suspected repeat is no reason to withhold a new term, only where there is a budget", () => {
+    const on = buildContext({ cfg, due: [], notes: "", pluginRoot: "/p" });
+    expect(on).toContain("no reason to withhold it");
+    const off = buildContext({ cfg: { ...cfg, fresh: 0 }, due: [], notes: "", pluginRoot: "/p" });
+    expect(off).not.toContain("no reason to withhold it");
+  });
+
   // The recap kept coming out km+es because "bilingual" reads as "the two
   // languages I'm learning". The prompt has to name English explicitly.
   test("pins the recap to target-language + English", () => {
@@ -427,7 +436,9 @@ describe("subject tags", () => {
     expect(e.seen).toBe("2026-02-02");
   });
 
-  test("buildContext brackets a tagged due item and brackets nothing for an untagged one", () => {
+  // An untagged item used to print no subject bracket, and the prompt asked the
+  // model to notice the absence — beside a [last used] bracket every item has.
+  test("buildContext brackets a tagged due item's subject and marks an untagged one [untagged]", () => {
     const cfg = { ledger: "/tmp/l.md", languages: [{ code: "es", name: "Spanish", domains: "tech" }], due: 5, fresh: 2 };
     const due = parseLedger(
       "- es: la tierra — ground | 2026-02-01 | subj: rf, hardware | seen: 2026-02-01\n" +
@@ -435,8 +446,10 @@ describe("subject tags", () => {
     );
     const ctx = buildContext({ cfg, due, notes: "", pluginRoot: "/p" });
     expect(ctx).toContain("- es: la tierra — ground  [rf, hardware]  [last used 2026-02-01]");
-    expect(ctx).toContain("- es: la red — network  [last used 2026-02-02]");
+    expect(ctx).toContain("- es: la red — network  [untagged]  [last used 2026-02-02]");
     expect(ctx).not.toContain("la red — network  []");
+    // The text has to describe the output it sits beside.
+    expect(ctx).not.toContain("no bracket");
   });
 });
 

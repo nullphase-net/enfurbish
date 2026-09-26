@@ -144,6 +144,19 @@ describe("session-start hook", () => {
     expect(due).not.toContain("teuk");
   });
 
+  // Without it, the only observable was surfaced.json's {at, sessions: []}, which
+  // a session read as a bug until it read the source (journal, 2026-09-24).
+  test("says which item rotated, in the session that rotated it and in no other", async () => {
+    const dir = twoTerms();
+    const ids = Array.from({ length: DORMANT_AFTER }, (_, i) => `s${i}`);
+    const runs = [ids[0], ...ids, "next"]; // ids[0] twice: a compaction re-fire
+    const said: string[] = [];
+    for (const id of runs) said.push(dueOf((await runHook(dir, id)).stdout));
+    const at = runs.length - 2; // the last of ids: its showing is the one that rotates teuk
+    said.forEach((due, i) => expect(due.includes("rotated to back")).toBe(i === at));
+    expect(said[at]).toContain(`rotated to back (shown in ${DORMANT_AFTER} sessions since last use): km: ទឹក (teuk)`);
+  });
+
   test("a run with no session id counts nothing", async () => {
     const dir = twoTerms();
     for (let i = 0; i <= DORMANT_AFTER; i++) {

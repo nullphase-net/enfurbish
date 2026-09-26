@@ -65,15 +65,17 @@ model to act on. A due item only fits a session whose work touches its subject; 
 tag the model re-derives that subject from the gloss every session, and measured across
 seven sessions it kept re-deriving the same three — ប៉ា (dad), la tierra (electrical ground),
 la valuación — into technical work they could never fit. The tag doesn't filter anything;
-it hands over evidence the ledger already had. Untagged lines surface exactly as before.
+it hands over evidence the ledger already had. An untagged line surfaces marked `[untagged]`,
+which asks the session to derive the subject and tag it.
 
 Rotation has two inputs. Sessions restamp what they use, so used items move to the back and
 unused ones drift to the front. And an item the hook shows in 3 sessions that never use it
 moves to the back on its own, dated that day, and comes back once everything else has rotated
 past it. Without that, the few items no session had an opening for held the head of the due
 list for three weeks. The hook keeps the count in `surfaced.json` beside your config, one
-entry per session, so re-injecting after a compaction counts once. There are no intervals and
-no ease factors.
+entry per session, so re-injecting after a compaction counts once, and it says
+`rotated to back` under the due list in the session that rotates an item. There are no
+intervals and no ease factors.
 
 Marks accumulate and are never decayed. A line with four ✓ on it is a line you have used
 four times, not a claim about how well you know it now — `seen:` is what drives selection.
