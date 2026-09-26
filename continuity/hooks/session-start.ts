@@ -95,18 +95,18 @@ export function buildBanner(opts: {
 }
 
 /**
- * Read SessionStart hook payload from stdin and pull out `session_id`.
- * Best-effort: returns null on empty stdin, parse failure, or missing field.
- * Never throws — the hook must remain best-effort and never block the session.
+ * Read SessionStart hook payload from stdin: `session_id`, and `source` (startup,
+ * resume, clear, compact). Best-effort: a field is null on empty stdin, parse
+ * failure, or when missing. Never throws — the hook must never block the session.
  */
-function readSessionIdFromStdin(): string | null {
+function readHookInput(): { sessionId: string | null; source: string | null } {
   try {
     const raw = readFileSync(0, "utf8");
-    if (!raw.trim()) return null;
-    const obj = JSON.parse(raw);
-    return typeof obj?.session_id === "string" ? obj.session_id : null;
+    const obj = raw.trim() ? JSON.parse(raw) : null;
+    const str = (v: unknown) => (typeof v === "string" ? v : null);
+    return { sessionId: str(obj?.session_id), source: str(obj?.source) };
   } catch {
-    return null;
+    return { sessionId: null, source: null };
   }
 }
 
@@ -138,13 +138,22 @@ if (import.meta.main) {
     // Re-fire suppression: if we've already fired for this session_id, exit silently.
     // Avoids the recurring "briefing buried under N redundant SessionStart fires"
     // failure logged across many wraps in the tooling journal.
-    const sessionId = readSessionIdFromStdin();
+    const { sessionId, source } = readHookInput();
+    // A compaction summary drops the model's banner: measured 2026-09-26 with a
+    // stand-in hook, the model saw no banner after /compact 2 of 2 times, and saw it
+    // again when the compact fire went through. So that fire is not suppressed; it
+    // carries the model's copy only, since the terminal still has the banner in
+    // scrollback.
+    let modelOnly = false;
     if (sessionId) {
       const stateDir = process.env.CONTINUITY_FIRSTFIRE_DIR || DEFAULT_FIRSTFIRE_DIR;
       if (!markFirstFire(stateDir, sessionId)) {
-        debugLog(`suppressed re-fire for session_id=${sessionId}`);
-        process.stdout.write("{}\n");
-        process.exit(0);
+        if (source !== "compact") {
+          debugLog(`suppressed re-fire for session_id=${sessionId}`);
+          process.stdout.write("{}\n");
+          process.exit(0);
+        }
+        modelOnly = true;
       }
     }
 
@@ -174,7 +183,7 @@ if (import.meta.main) {
       // slow-scan note is operator diagnostics and stays on the terminal. File
       // content enters context only via /next.
       process.stdout.write(JSON.stringify({
-        systemMessage: withNote,
+        ...(modelOnly ? {} : { systemMessage: withNote }),
         hookSpecificOutput: {
           hookEventName: "SessionStart",
           additionalContext: buildBanner({ sessionCwd, projectRoot, handoffs, now, cut, channel: "model" }) ?? banner,

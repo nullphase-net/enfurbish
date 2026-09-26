@@ -273,6 +273,26 @@ test("first fire emits banner, second fire with same session_id is suppressed", 
   expect(res2.stdout.trim()).toBe("{}");
 });
 
+// A compaction summary drops the model's banner. Measured 2026-09-26 on Claude Code
+// 2.1.283 with a stand-in hook (context on the first fire per session_id, {} after):
+// after /compact the model reported no banner, 2 of 2; a resume without compaction
+// still showed it; letting the compact fire through restored it, 1 of 1. The terminal
+// keeps the banner in scrollback, so the compact fire carries the model's copy only.
+test("a compact fire re-sends the banner to the model only; resume stays suppressed", () => {
+  const home = mkDir("affirm-home-compact-");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const dir = mkDir("affirm-proj-compact-");
+  writeFileSync(join(dir, "CLAUDE.md"), "v1");
+  const env = { CLAUDE_PROJECT_DIR: dir, HOME: home, AFFIRM_FIRSTFIRE_DIR: mkDir("affirm-firstfire-compact-") };
+  const fire = (source: string) => JSON.parse(runHook(env, undefined, JSON.stringify({ session_id: "s", source })).stdout);
+
+  expect(fire("startup").systemMessage).toContain("Affirm:");
+  const compact = fire("compact");
+  expect(compact.systemMessage).toBeUndefined();
+  expect(compact.hookSpecificOutput.additionalContext).toContain("do not run /affirm -a");
+  expect(fire("resume")).toEqual({});
+});
+
 test("missing stdin or session_id does not suppress (best-effort)", () => {
   const home = mkDir("affirm-home-nostdin-");
   mkdirSync(join(home, ".claude"), { recursive: true });

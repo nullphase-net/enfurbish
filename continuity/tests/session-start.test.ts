@@ -284,6 +284,25 @@ test("first fire emits banner, second fire with same session_id is suppressed", 
   expect(res2.stdout.trim()).toBe("{}");
 });
 
+// A compaction summary drops the model's banner. Measured 2026-09-26 on Claude Code
+// 2.1.283 with a stand-in hook (context on the first fire per session_id, {} after):
+// after /compact the model reported no banner, 2 of 2; a resume without compaction
+// still showed it; letting the compact fire through restored it, 1 of 1. The terminal
+// keeps the banner in scrollback, so the compact fire carries the model's copy only.
+test("a compact fire re-sends the banner to the model only; resume stays suppressed", () => {
+  const root = mkdtempSync(join(tmpdir(), "continuity-compact-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "continuity-compact-state-"));
+  writeFileSync(join(root, "NEXT_SESSION.md"), "handoff");
+  const env = { CLAUDE_PROJECT_DIR: root, CONTINUITY_FIRSTFIRE_DIR: stateDir };
+  const fire = (source: string) => JSON.parse(runHook(env, JSON.stringify({ session_id: "s", source })).stdout);
+
+  expect(fire("startup").systemMessage).toContain("NEXT_SESSION.md present");
+  const compact = fire("compact");
+  expect(compact.systemMessage).toBeUndefined();
+  expect(compact.hookSpecificOutput.additionalContext).toContain("NEXT_SESSION.md present");
+  expect(fire("resume")).toEqual({});
+});
+
 test("different session_id is not suppressed", () => {
   const root = mkdtempSync(join(tmpdir(), "continuity-refire-distinct-"));
   const stateDir = mkdtempSync(join(tmpdir(), "continuity-refire-distinct-state-"));
