@@ -52,12 +52,24 @@ export function buildBanner(opts: {
   now?: number;
   /** Who reads it. The terminal gets the imperative; the model gets the fact and a guard. */
   channel?: "user" | "model";
+  /** Dirs the walk left unsearched at its time budget (ScanResult.cut). */
+  cut?: number;
 }): string | null {
   const now = opts.now ?? Date.now();
   const local = opts.handoffs.find(h => h.local);
   const siblings = opts.handoffs.filter(h => !h.local);
+  const cut = opts.cut ?? 0;
+  const unsearched = `${cut} dir${cut === 1 ? "" : "s"} under ${opts.projectRoot} unsearched`;
 
-  if (!local && siblings.length === 0) return null;
+  // A cut walk that found nothing is not a project with no handoff, and {} says that it is.
+  if (!local && siblings.length === 0) {
+    return cut
+      ? `Continuity: no NEXT_SESSION.md found, but the handoff scan stopped at its time budget with ${unsearched}.`
+      : null;
+  }
+  const cutNote = cut
+    ? `The handoff scan stopped at its time budget with ${unsearched}, so a newer handoff may exist.`
+    : "";
 
   const line = (h: Handoff) =>
     `\n  - ${relative(opts.projectRoot, h.path)}  (modified ${fmtAge(h.mtimeMs, now)}${fmtBehind(h)})`;
@@ -74,12 +86,12 @@ export function buildBanner(opts: {
       msg += ` ${siblings.length} sibling handoff${siblings.length === 1 ? "" : "s"} also found:`;
       for (const s of siblings) msg += line(s);
     }
-    return msg;
+    return cutNote ? `${msg} ${cutNote}` : msg;
   }
 
   let msg = `Continuity: no NEXT_SESSION.md in this cwd, but ${siblings.length} handoff${siblings.length === 1 ? "" : "s"} in sibling dirs:`;
   for (const s of siblings) msg += line(s);
-  return msg;
+  return cutNote ? `${msg}\n${cutNote}` : msg;
 }
 
 /**
@@ -138,14 +150,14 @@ if (import.meta.main) {
 
     const sessionCwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
     const projectRoot = findProjectRoot(sessionCwd);
-    const { files, elapsedMs, walks } = scanForNextSessionsWithStats(projectRoot);
+    const { files, elapsedMs, walks, cut } = scanForNextSessionsWithStats(projectRoot);
     // collect() spawns a bounded `git rev-list` per handoff. That is subprocess work
     // on the same blocking path the walk is on, so it belongs in the same budget:
     // timing only the walk under-reports the hook by exactly the part that can hang.
     const t0 = performance.now();
     const handoffs = collect(sessionCwd, projectRoot, files);
     const now = Date.now();
-    const banner = buildBanner({ sessionCwd, projectRoot, handoffs, now });
+    const banner = buildBanner({ sessionCwd, projectRoot, handoffs, now, cut });
     const totalMs = elapsedMs + (performance.now() - t0);
     debugLog(`cwd=${sessionCwd} root=${projectRoot} files=${files.length} elapsedMs=${totalMs.toFixed(1)} walkMs=${elapsedMs.toFixed(1)} emit=${banner === null ? "empty" : "banner"}`);
     if (banner === null) {
@@ -165,7 +177,7 @@ if (import.meta.main) {
         systemMessage: withNote,
         hookSpecificOutput: {
           hookEventName: "SessionStart",
-          additionalContext: buildBanner({ sessionCwd, projectRoot, handoffs, now, channel: "model" }) ?? banner,
+          additionalContext: buildBanner({ sessionCwd, projectRoot, handoffs, now, cut, channel: "model" }) ?? banner,
         },
       }) + "\n");
     }

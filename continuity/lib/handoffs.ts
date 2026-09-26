@@ -33,6 +33,16 @@ const IGNORE_DIRS = new Set([
   "__pycache__", ".venv", "venv",
 ]);
 
+// The walk's time budget. With no project marker above it the walk starts at the cwd
+// itself, and a cwd holding multi-TB FSKit mounts walks them: the hook then dies at its
+// 10s timeout and prints nothing, which reads as "no handoff", and /next's CLI has no
+// outer bound at all. 2s leaves the hook room for its per-handoff `git rev-list`s.
+// CONTINUITY_SCAN_MS overrides it.
+function scanBudgetMs(): number {
+  const n = Number.parseInt(process.env.CONTINUITY_SCAN_MS ?? "", 10);
+  return Number.isFinite(n) && n >= 0 ? n : 2000;
+}
+
 export type NextSessionFile = { path: string; mtimeMs: number };
 
 export type ScanResult = {
@@ -40,16 +50,24 @@ export type ScanResult = {
   elapsedMs: number;
   /** Per-toplevel-segment walk counts (subdirs entered under that toplevel). */
   walks: Map<string, number>;
+  /** Dirs left unentered once the budget ran out. Their subtrees are unknown, so this
+   *  is a floor on what went unsearched, and 0 means the walk was complete. */
+  cut: number;
 };
 
 export function scanForNextSessions(root: string, maxDepth = MAX_DEPTH): NextSessionFile[] {
   return scanForNextSessionsWithStats(root, maxDepth).files;
 }
 
-export function scanForNextSessionsWithStats(root: string, maxDepth = MAX_DEPTH): ScanResult {
+export function scanForNextSessionsWithStats(
+  root: string,
+  maxDepth = MAX_DEPTH,
+  budgetMs = scanBudgetMs(),
+): ScanResult {
   const out: NextSessionFile[] = [];
   const ignored = getIgnoredDirs(root);
   const walks = new Map<string, number>();
+  let cut = 0;
   const start = performance.now();
   function walk(dir: string, depth: number, topLevel: string | null) {
     if (depth > maxDepth) return;
@@ -63,12 +81,18 @@ export function scanForNextSessionsWithStats(root: string, maxDepth = MAX_DEPTH)
       if (e.isSymbolicLink()) continue;
       const full = join(dir, e.name);
       if (e.isDirectory()) {
+        if (depth >= maxDepth) continue; // its entries would lie past the depth cap
         // Cheap-first ordering: name-based checks before the absolute-path
         // Set lookup, which involves the `full` string we already built but
         // would otherwise want to avoid for skipped dirs.
         if (e.name.startsWith(".")) continue;
         if (IGNORE_DIRS.has(e.name)) continue;
         if (ignored.has(full)) continue;
+        // The root's own entries are always read; below it, the budget decides.
+        if (performance.now() - start > budgetMs) {
+          cut++;
+          continue;
+        }
         const nextTop = topLevel ?? e.name;
         walks.set(nextTop, (walks.get(nextTop) ?? 0) + 1);
         walk(full, depth + 1, nextTop);
@@ -81,7 +105,7 @@ export function scanForNextSessionsWithStats(root: string, maxDepth = MAX_DEPTH)
     }
   }
   walk(root, 0, null);
-  return { files: out, elapsedMs: performance.now() - start, walks };
+  return { files: out, elapsedMs: performance.now() - start, walks, cut };
 }
 
 export function findProjectRoot(start: string): string {
@@ -317,8 +341,10 @@ const plural = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
  * cwd-local pointer is not the newest one, say so and say by how much, because
  * that is the exact condition under which reading only the local file is wrong.
  */
-export function report(hs: Handoff[], projectRoot: string, now: number): string {
-  const head = `${hs.length} handoff${hs.length === 1 ? "" : "s"} · root ${projectRoot}`;
+export function report(hs: Handoff[], projectRoot: string, now: number, cut = 0): string {
+  // A cut walk's "0 handoffs" and "newest" both describe only what it reached.
+  const scan = cut ? ` · scan cut at its time budget: ${cut} dir${cut === 1 ? "" : "s"} unsearched` : "";
+  const head = `${hs.length} handoff${hs.length === 1 ? "" : "s"} · root ${projectRoot}${scan}`;
   if (hs.length === 0) return head;
 
   const newest = hs[0];
@@ -499,7 +525,8 @@ export function main(
 
   const cwd = (flag === "--cwd" && args[1]) || process.cwd();
   const root = findProjectRoot(cwd);
-  emit(report(collect(cwd, root), root, now));
+  const { files, cut } = scanForNextSessionsWithStats(root);
+  emit(report(collect(cwd, root, files), root, now, cut));
   return 0;
 }
 

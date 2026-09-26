@@ -17,6 +17,33 @@ function runHook(env: Record<string, string>, stdin?: string) {
   });
 }
 
+test("a scan cut short says so even when it found no handoff", () => {
+  const unsearched = buildBanner({ sessionCwd: "/p", projectRoot: "/p", handoffs: [], cut: 3 });
+  expect(unsearched).toBe("Continuity: no NEXT_SESSION.md found, but the handoff scan stopped at its time budget with 3 dirs under /p unsearched.");
+  expect(buildBanner({ sessionCwd: "/p", projectRoot: "/p", handoffs: [] })).toBeNull();
+});
+
+test("a scan cut short warns that a newer handoff may exist", () => {
+  const h: Handoff = { path: "/p/NEXT_SESSION.md", rel: "NEXT_SESSION.md", mtimeMs: 0, wrapped: null,
+    commitsSince: null, local: true, ownership: "assistant", size: 1 };
+  for (const channel of ["user", "model"] as const) {
+    const msg = buildBanner({ sessionCwd: "/p", projectRoot: "/p", handoffs: [h], now: 1000, channel, cut: 1 })!;
+    expect(msg).toEndWith(" The handoff scan stopped at its time budget with 1 dir under /p unsearched, so a newer handoff may exist.");
+  }
+  expect(buildBanner({ sessionCwd: "/p", projectRoot: "/p", handoffs: [h], now: 1000 })).not.toContain("time budget");
+});
+
+// The hook wiring, not only buildBanner: without it a cut walk that found nothing
+// printed {} — exactly what a project with no handoff prints.
+test("hook reports a cut scan end-to-end on both channels", () => {
+  const dir = mkdtempSync(join(tmpdir(), "continuity-hook-cut-"));
+  mkdirSync(join(dir, "sub"));
+  writeFileSync(join(dir, "sub", "NEXT_SESSION.md"), "handoff");
+  const json = JSON.parse(runHook({ CLAUDE_PROJECT_DIR: dir, CONTINUITY_SCAN_MS: "0" }).stdout);
+  expect(json.systemMessage).toContain("1 dir under");
+  expect(json.hookSpecificOutput.additionalContext).toContain("1 dir under");
+});
+
 test("emits empty JSON when no NEXT_SESSION.md exists anywhere", () => {
   const dir = mkdtempSync(join(tmpdir(), "continuity-hook-"));
   const res = runHook({ CLAUDE_PROJECT_DIR: dir });

@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHECK_RESULTS, checkReport, collect, commitsSince, formatHeader, generation, main, ownership, ownershipSince, report, stamp, windowSince } from "../lib/handoffs";
+import { CHECK_RESULTS, checkReport, collect, commitsSince, formatHeader, generation, main, ownership, ownershipSince, report, scanForNextSessionsWithStats, stamp, windowSince } from "../lib/handoffs";
 import { spawnSync } from "node:child_process";
 import { gitInitClean } from "./helpers/git";
 
@@ -195,6 +195,57 @@ test("report on an empty project states the count rather than staying silent", (
   const root = mkdtempSync(join(tmpdir(), "handoffs-"));
   writeFileSync(join(root, "CLAUDE.md"), "# marker\n");
   expect(report(collect(root, root), root, Date.now())).toBe(`0 handoffs · root ${root}`);
+});
+
+// --- the walk's time budget ----------------------------------------------------
+// With no project marker the walk starts at the cwd itself, and a session started in
+// a directory of multi-TB FSKit mounts walked them. The hook dies at its 10s timeout
+// and prints nothing, which reads as "no handoff"; /next's CLI had no bound at all.
+
+function tree(): string {
+  const root = mkdtempSync(join(tmpdir(), "handoffs-budget-"));
+  writeFileSync(join(root, "NEXT_SESSION.md"), BODY);
+  for (const d of ["a", "b"]) {
+    mkdirSync(join(root, d));
+    writeFileSync(join(root, d, "NEXT_SESSION.md"), BODY);
+  }
+  return root;
+}
+
+test("a walk past its budget keeps the root, stops, and counts the dirs it skipped", () => {
+  const root = tree();
+  const r = scanForNextSessionsWithStats(root, 4, 0);
+  expect(r.files.map(f => f.path)).toEqual([join(root, "NEXT_SESSION.md")]);
+  expect(r.cut).toBe(2);
+});
+
+test("a walk inside its budget cuts nothing", () => {
+  const root = tree();
+  const r = scanForNextSessionsWithStats(root);
+  expect(r.files.length).toBe(3);
+  expect(r.cut).toBe(0);
+});
+
+test("report says how much of the tree the scan did not search", () => {
+  const root = tree();
+  expect(report(collect(root, root), root, Date.now())).not.toContain("unsearched");
+  const head = report(collect(root, root), root, Date.now(), 2).split("\n")[0];
+  expect(head).toContain("scan cut at its time budget: 2 dirs unsearched");
+});
+
+test("the CLI carries the cut into its report", () => {
+  const root = tree();
+  writeFileSync(join(root, "CLAUDE.md"), "# marker\n");
+  const prev = process.env.CONTINUITY_SCAN_MS;
+  process.env.CONTINUITY_SCAN_MS = "0";
+  try {
+    const out: string[] = [];
+    main(["--cwd", root], Date.now(), s => void out.push(s));
+    expect(out.join("\n").split("\n")[0]).toBe(`1 handoff · root ${root} · scan cut at its time budget: 2 dirs unsearched`);
+  } finally {
+    if (prev === undefined) delete process.env.CONTINUITY_SCAN_MS;
+    else process.env.CONTINUITY_SCAN_MS = prev;
+  }
 });
 
 // --- CLI -------------------------------------------------------------------

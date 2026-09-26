@@ -64,15 +64,18 @@ straight back.
 
 Fires on session startup, `/clear`, and post-compact. Walks up to the project root (nearest `.git` or `CLAUDE.md`), recursively scans for `NEXT_SESSION.md` files (depth 4, with an ignore list), and emits a one-line banner if any are found, on both channels: `systemMessage` for the terminal and `additionalContext` for the model, so a session knows a pointer exists without loading it. The banner names the file(s); the terminal copy suggests `/next`, the model's copy says the user may run it and not to run it unprompted. **The handoff content is not loaded into context until you ask** — so a fresh session stays clean if you don't want to pick up.
 
-Three states:
+Four states:
 
 | Local file? | Siblings elsewhere? | Hook output |
 |---|---|---|
 | yes | — | banner with mtime, suggests `/next`, lists siblings if any |
 | no | yes | banner listing sibling paths and mtimes |
-| no | no | silent (`{}`) |
+| no | no, scan complete | silent (`{}`) |
+| no | none found, scan cut | one line saying how many dirs went unsearched |
 
 The scan prunes hidden directories (any name starting with `.`) and gitignored directories (via one `git ls-files --others --ignored --exclude-standard --directory -z` call at scan start). A gitignored *file* named `NEXT_SESSION.md` is still surfaced — only directories are pruned. When the scan exceeds `CONTINUITY_SLOW_MS` milliseconds (default 500), the banner gains a suffix naming the heaviest top-level directories walked, so you know what to add to `.gitignore`. The suffix is only appended when there is otherwise a banner to emit — a slow scan with no handoffs stays silent.
+
+The walk also has a time budget, `CONTINUITY_SCAN_MS` (default 2000). With no `.git` or `CLAUDE.md` above the cwd the scan starts at the cwd itself, and a cwd holding large network or FSKit mounts would otherwise walk them until the hook's 10-second timeout killed it — printing nothing, which reads exactly like "no handoff". Past the budget the scan stops descending and counts the directories it skipped; the banner and `/next`'s report both say so, including when nothing was found. A cut scan is never silent.
 
 `/wrap` adds one more nicety: when it writes `NEXT_SESSION.md` in a git repo and the file is neither in `.gitignore` nor already tracked, the final report prints a single-line suggestion to gitignore it. The skill never edits `.gitignore` — it just suggests.
 
