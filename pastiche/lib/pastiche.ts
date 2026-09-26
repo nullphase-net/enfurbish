@@ -187,17 +187,23 @@ export function saveSurfaced(path: string, s: Surfaced): void {
   writeAtomic(path, `${JSON.stringify(s)}\n`);
 }
 
-/** Rewrite `seen:` to `date` on every ledger line containing `needle`. */
+/** Rewrite `seen:` to `date` on every line of the term `needle` names. */
 export function restamp(text: string, needle: string, date: string): string {
+  return restampLines(text, matchingLines(text, needle), date);
+}
+
+/** Rewrite `seen:` to `date` on exactly `lines`: `--add`'s dupes, one language's. */
+function restampLines(text: string, lines: Iterable<string>, date: string): string {
+  const hit = new Set(lines);
   return text
     .split("\n")
-    .map(l => (CODE.test(l) && l.includes(needle) ? l.replace(SEEN, `seen: ${date}`) : l))
+    .map(l => (hit.has(l) ? l.replace(SEEN, `seen: ${date}`) : l))
     .join("\n");
 }
 
 /**
- * Prepend a ✓ to the marks field and restamp, on every line containing
- * `needle` — marking only ever happens because the item was just used.
+ * Prepend a ✓ to the marks field and restamp, on every line of the term
+ * `needle` names — marking only ever happens because the item was just used.
  *
  * The marks field is optional and free text (`✓✓ family baseline`), so a line
  * without one gets it inserted before `seen:`, and a hand-written line with no
@@ -205,10 +211,11 @@ export function restamp(text: string, needle: string, date: string): string {
  * `seen:` is what drives selection.
  */
 export function mark(text: string, needle: string, date: string): string {
+  const hit = new Set(matchingLines(text, needle));
   return text
     .split("\n")
     .map(l => {
-      if (!CODE.test(l) || !l.includes(needle)) return l;
+      if (!hit.has(l)) return l;
       if (!SEEN.test(l)) return `${l} | ✓ | seen: ${date}`;
       const parts = l.split(" | ");
       const head = parts.slice(0, -1);
@@ -224,17 +231,18 @@ export function mark(text: string, needle: string, date: string): string {
 }
 
 /**
- * Set (or replace) the `subj:` tag on every line containing `needle`.
+ * Set (or replace) the `subj:` tag on every line of the term `needle` names.
  *
  * It exists because the tag has to reach the ~20 items already in rotation, and
  * those lines were written before the field did. A field with no writer for the
  * lines that predate it is a field that stays empty forever.
  */
 export function tag(text: string, needle: string, subject: string): string {
+  const hit = new Set(matchingLines(text, needle));
   return text
     .split("\n")
     .map(l => {
-      if (!CODE.test(l) || !l.includes(needle)) return l;
+      if (!hit.has(l)) return l;
       if (SUBJ.test(l)) return l.replace(SUBJ, `subj: ${subject}`);
       if (!SEEN.test(l)) return `${l} | subj: ${subject}`;
       const parts = l.split(" | ");
@@ -244,13 +252,34 @@ export function tag(text: string, needle: string, subject: string): string {
 }
 
 /**
- * Entry lines containing `needle`. The writers below rewrite exactly these, so
- * the CLI uses it to tell "nothing matched" apart from "matched, already
- * current" — a rewrite that changes no bytes is otherwise indistinguishable
- * from a miss, and reporting it as one loses real state.
+ * Every entry line of the one term `needle` names, or none. The writers above
+ * rewrite exactly these, so the CLI uses it to tell "nothing matched" apart from
+ * "matched, already current" — a rewrite that changes no bytes is otherwise
+ * indistinguishable from a miss, and reporting it as one loses real state.
+ *
+ * A needle names a term (`termKey`), and all of a term's lines move together.
+ * The exact term first; else a substring of exactly one term's text (`teuk`),
+ * which then resolves to all of that term's lines. A substring spanning several
+ * terms names none of them (`termsContaining` says which, for the report). Until
+ * 2026-09-26 this was a substring of the whole line, which failed both ways: a
+ * mark on `អរគុណ (arkun)` left `អរគុណ (arkun / awkun)` due, and replaying 54
+ * real calls, 7 restamped 16 lines of other terms — `la red` moved
+ * `la redirección` and `la redundancia` out of the due list unused.
  */
 export function matchingLines(text: string, needle: string): string[] {
-  return text.split("\n").filter(l => CODE.test(l) && l.includes(needle));
+  const entries = parseLedger(text);
+  const want = termKey(needle);
+  let key: string | undefined = entries.some(e => termKey(e.term) === want) ? want : undefined;
+  if (key === undefined) {
+    const terms = termsContaining(entries, needle);
+    if (terms.length === 1) key = terms[0];
+  }
+  return key === undefined ? [] : entries.filter(e => termKey(e.term) === key).map(e => e.line);
+}
+
+/** The distinct terms whose text contains `needle`, in ledger order. */
+export function termsContaining(entries: Entry[], needle: string): string[] {
+  return [...new Set(entries.filter(e => e.term.includes(needle)).map(e => termKey(e.term)))];
 }
 
 /**
@@ -390,15 +419,26 @@ export function headOf(body: string): string {
 }
 
 /**
- * Every ledger line for the same language and the same head term.
+ * What makes two lines the same term: the head with any parenthetical dropped.
+ * The parenthetical is a romanization or a note, and neither is the term:
+ * `អរគុណ (arkun)` and `អរគុណ (arkun / awkun)` are one word, and so are
+ * `តូច (toch)` and `តូច (toch; final ch unreleased)`. On 2026-09-24 three km
+ * terms were split this way across 657 entries; no es term was.
+ */
+export function termKey(body: string): string {
+  return headOf(body).split(" (")[0].trim();
+}
+
+/**
+ * Every ledger line for the same language and the same term (`termKey`).
  * This is the check `text.includes(body)` cannot make: nine sessions wrote nine
  * glosses of `el registro` and each one looked new. All of them, not the first,
  * because copies have to rotate together.
  */
 export function sameTerm(text: string, code: string, body: string): string[] {
-  const head = headOf(body);
+  const key = termKey(body);
   return parseLedger(text)
-    .filter(e => e.code === code && headOf(e.term) === head)
+    .filter(e => e.code === code && termKey(e.term) === key)
     .map(e => e.line);
 }
 
@@ -467,15 +507,22 @@ export function main(
 
     const hits = matchingLines(before, needle);
     if (!hits.length) {
-      out(`no match ${JSON.stringify(needle)} in ${parseLedger(before).length} entries`);
-      // Needles get built as "<script> (<romanization>)", but the ledger's
-      // parenthetical carries notes, so the closing paren never lines up.
+      const entries = parseLedger(before);
+      const near = (terms: string[]) => {
+        for (const t of terms.slice(0, 3)) {
+          const e = entries.find(x => termKey(x.term) === t)!;
+          out(`  near: ${e.code}: ${e.term.slice(0, 68)}`);
+        }
+      };
+      const terms = termsContaining(entries, needle);
+      if (terms.length > 1) {
+        out(`ambiguous ${JSON.stringify(needle)}: ${terms.length} terms contain it — name one`);
+        return near(terms), 0;
+      }
+      out(`no match ${JSON.stringify(needle)} in ${entries.length} entries`);
       // Retry on the leading token and show what it nearly hit.
       const head = needle.split(" ")[0];
-      for (const l of (head === needle ? [] : matchingLines(before, head)).slice(0, 3)) {
-        out(`  near: ${l.slice(2, 72)}`);
-      }
-      return 0;
+      return near(head === needle ? [] : termsContaining(entries, head)), 0;
     }
 
     const after = fn(before, needle, arg);
@@ -551,11 +598,11 @@ export function main(
       // out with it — it is data about the ledger's shape, not noise.
       const hits = sameTerm(text, code, b);
       if (hits.length) {
-        const after = hits.reduce((t, l) => restamp(t, l, date), text);
+        const after = restampLines(text, hits, date);
         const state = after === text ? "already" : "restamped";
         dupes.push(
           `dupe: ${headOf(b)} ×${hits.length} — ${state} ${date}`,
-          `  have: ${restamp(hits[0], hits[0], date).slice(2, 96)}`,
+          `  have: ${restampLines(hits[0], hits, date).slice(2, 96)}`,
         );
         text = after;
         continue;

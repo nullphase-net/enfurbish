@@ -115,8 +115,9 @@ dupe: la red ×1 — restamped 2026-09-23
 (2 entries)
 ```
 
-Dedupe matches on the *head* — the term before its gloss — in the same language, so a
-reworded gloss is caught as well as an exact repeat. Measured on a real ledger before this
+Dedupe matches on the *term* — the text before its gloss, with any parenthetical dropped — in
+the same language, so a reworded gloss or a second romanization (`អរគុណ (arkun)` beside
+`អរគុណ (arkun / awkun)`) is caught as well as an exact repeat. Measured on a real ledger before this
 existed: 69 duplicated terms and 168 redundant lines, `el umbral` seventeen times, each one
 reported as new. A dupe is not refused, it is **restamped**: the session reached for the term,
 so it was surfaced, which is what `--seen` records. Every copy moves together and the `×N` says
@@ -124,6 +125,14 @@ how many there are. The refusal it replaced cost three or four round trips per s
 (`--add`, read the existing line, `--seen`) to reach the same write. `exists:` remains for the
 one case with nothing to restamp: the body is in the file, but under a different language or
 inside another term's gloss.
+
+`--seen`, `--mark` and `--tag` name a term the same way, and every line of that term moves
+together. The exact term wins (`la red` moves `la red`, not `la redirección` or `la red
+interna`); failing that, a fragment of exactly one term's text resolves to it (`teuk`); a
+fragment spanning several terms is reported as ambiguous with the candidates, and nothing is
+written. Until 0.8.0 the needle was a substring of the whole line: replaying 54 real calls, 7
+restamped 16 lines of *other* terms, moving them out of the due list unused, and a mark on
+`អរគុណ (arkun)` left its `(arkun / awkun)` copy due.
 
 Bare `--add <code>` with no body is still arg misuse (exit 2), not a blocking read on a tty —
 the `-` is required to ask for stdin.

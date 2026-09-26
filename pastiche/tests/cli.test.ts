@@ -108,25 +108,27 @@ describe("--seen / --mark", () => {
     expect(readFileSync(c.ledger, "utf8")).toBe(seed);
   });
 
-  // Regression: ledger parentheticals carry pronunciation notes, so a needle
-  // built as "<script> (<romanization>)" is not a substring of the line.
-  test("a near miss names the line it almost matched", () => {
+  // Ledger parentheticals carry pronunciation notes, so a needle built as
+  // "<script> (<romanization>)" is not a substring of the line. Until the term
+  // key dropped the parenthetical this read "no match" plus a near: hint.
+  test("a needle whose parenthetical differs from the line's still names the term", () => {
     const seed = `- km: តូច (toch; family: "too", final ch unreleased) — small | 2026-01-01 | seen: 2026-01-01\n`;
     const c = fixture(seed);
     const said: string[] = [];
     expect(main(["--seen", "តូច (toch)"], c, s => said.push(s))).toBe(0);
-    expect(said.join("\n")).toContain("no match");
-    expect(said.join("\n")).toContain("near:");
-    expect(said.join("\n")).toContain("តូច");
+    expect(said.join("\n")).toContain("restamped");
+    expect(readFileSync(c.ledger, "utf8")).toContain(`| seen: ${NOW}`);
   });
 
   test("a needle hitting several lines says how many it changed", () => {
     const c = fixture(
       "- es: uno — one | 2026-01-01 | seen: 2026-01-01\n" +
+      "- es: uno — the number one | 2026-01-01 | seen: 2026-01-01\n" +
       "- es: uno más — one more | 2026-01-01 | seen: 2026-01-01\n");
     const said: string[] = [];
     main(["--seen", "uno"], c, s => said.push(s));
     expect(said.join("\n")).toContain("2 lines");
+    expect(readFileSync(c.ledger, "utf8")).toContain("uno más — one more | 2026-01-01 | seen: 2026-01-01");
   });
 
   test("a missing ledger exits 0 rather than failing the session", () => {
@@ -135,6 +137,71 @@ describe("--seen / --mark", () => {
 
   test("a missing term is arg misuse", () => {
     expect(main(["--mark"], fixture(SEED))).toBe(2);
+  });
+});
+
+// A needle names a TERM, and every line of that term moves together. The term is
+// the head with any parenthetical dropped. Measured 2026-09-24/26: a mark on
+// "អរគុណ (arkun)" left "អរគុណ (arkun / awkun)" due, and replaying 54 real
+// --seen/--mark/--tag calls, 7 restamped 16 lines of OTHER terms by substring
+// ("la red" moved la redirección and la redundancia out of the due list).
+describe("which lines a needle names", () => {
+  const SPLIT =
+    "- km: អរគុណ (arkun) — thank you | 2026-01-01 | seen: 2026-01-01\n" +
+    "- km: អរគុណ (arkun / awkun) — thanks | 2026-01-02 | seen: 2026-01-02\n";
+
+  for (const [flag, arg] of [["--seen"], ["--mark"], ["--tag", "manners"]] as const) {
+    test(`${flag} moves every romanization of a term together`, () => {
+      const c = fixture(SPLIT);
+      const said: string[] = [];
+      main([flag, "អរគុណ (arkun)", ...(arg ? [arg] : [])], c, s => said.push(s));
+      expect(said.join("\n")).toContain("2 lines");
+      const after = readFileSync(c.ledger, "utf8").split("\n").filter(Boolean);
+      expect(after.length).toBe(2);
+      expect(after.every(l => (arg ? l.includes(`subj: ${arg}`) : l.includes(`seen: ${NOW}`)))).toBe(true);
+    });
+  }
+
+  test("an exact term does not drag in terms that merely contain it", () => {
+    const seed =
+      "- es: la red — network | 2026-01-01 | seen: 2026-01-01\n" +
+      "- es: la redirección — a redirect | 2026-01-01 | seen: 2026-01-01\n" +
+      "- es: la red interna — internal network | 2026-01-01 | seen: 2026-01-01\n" +
+      "- es: rechazar — to reject (la red rechazó el SMS) | 2026-01-01 | seen: 2026-01-01\n";
+    const c = fixture(seed);
+    main(["--seen", "la red"], c);
+    const lines = readFileSync(c.ledger, "utf8").split("\n").filter(Boolean);
+    expect(lines.filter(l => l.includes(`seen: ${NOW}`))).toEqual([`- es: la red — network | 2026-01-01 | seen: ${NOW}`]);
+  });
+
+  test("a bare script names only its own term, not a phrase that starts with it", () => {
+    const seed =
+      "- km: ញ៉ាំ (nyam) — to eat | 2026-01-01 | seen: 2026-01-01\n" +
+      "- km: ញ៉ាំបាយហើយនៅ? (nyam bai haey nov?) — have you eaten? | 2026-01-01 | seen: 2026-01-01\n";
+    const c = fixture(seed);
+    main(["--seen", "ញ៉ាំ"], c);
+    expect(readFileSync(c.ledger, "utf8")).toContain("have you eaten? | 2026-01-01 | seen: 2026-01-01");
+    expect(readFileSync(c.ledger, "utf8")).toContain(`to eat | 2026-01-01 | seen: ${NOW}`);
+  });
+
+  test("a fragment naming one term resolves to all of that term's lines", () => {
+    const c = fixture(SPLIT);
+    const said: string[] = [];
+    main(["--seen", "awkun"], c, s => said.push(s));
+    expect(said.join("\n")).toContain("2 lines");
+    expect(readFileSync(c.ledger, "utf8").split(`seen: ${NOW}`).length - 1).toBe(2);
+  });
+
+  test("a fragment spanning several terms is ambiguous, names them, and writes nothing", () => {
+    const seed =
+      "- es: la red — network | 2026-01-01 | seen: 2026-01-01\n" +
+      "- es: la redirección — a redirect | 2026-01-01 | seen: 2026-01-01\n";
+    const c = fixture(seed);
+    const said: string[] = [];
+    expect(main(["--seen", "la re"], c, s => said.push(s))).toBe(0);
+    expect(said[0]).toBe(`ambiguous "la re": 2 terms contain it — name one`);
+    expect(said.slice(1)).toEqual(["  near: es: la red — network", "  near: es: la redirección — a redirect"]);
+    expect(readFileSync(c.ledger, "utf8")).toBe(seed);
   });
 });
 
@@ -430,6 +497,15 @@ describe("--add duplicate detection", () => {
     expect(main(["--add", "km", "la red — network"], c, s => void out.push(s))).toBe(0);
     expect(out).toEqual(["exists: la red — network"]);
     expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+  });
+
+  test("a new romanization of an existing term restamps it, not minted as new", () => {
+    const seed = "- km: អរគុណ (arkun / awkun) — thanks | 2026-01-01 | seen: 2026-01-01\n";
+    const c = fixture(seed);
+    const out: string[] = [];
+    main(["--add", "km", "អរគុណ (arkun) — thank you"], c, s => void out.push(s));
+    expect(out[0]).toBe(`dupe: អរគុណ (arkun) ×1 — restamped ${NOW}`);
+    expect(readFileSync(c.ledger, "utf8")).toBe(`- km: អរគុណ (arkun / awkun) — thanks | 2026-01-01 | seen: ${NOW}\n`);
   });
 
   test("a genuinely new term is still added", () => {
