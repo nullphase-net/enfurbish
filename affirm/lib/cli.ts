@@ -34,9 +34,11 @@ function fmtTs(ms: number): string {
 function fmtGit(info: GitInfo): string | null {
   if (!info.inRepo) return null;
   if (!info.lastCommit) {
+    if (info.unknown) return "git state unknown";
     return info.dirty ? "untracked (uncommitted)" : "untracked";
   }
   const base = `${info.lastCommit.author} — last commit ${info.lastCommit.date}`;
+  if (info.unknown) return `${base} (working tree state unknown)`;
   return info.dirty ? `${base} (uncommitted local changes)` : base;
 }
 
@@ -133,9 +135,13 @@ export function renderSince(
     const status = statusOf(gf.path, stored);
     if (status !== "affirmed") needsReview = true;
     const subjects = commitsTouching(dirname(gf.path), gf.path, iso);
-    const commits = subjects.length
+    // A failed log (null) matters only for a tracked file, the one whose "no
+    // commits in window" it would otherwise claim. For a file git cannot see, the
+    // log fails for that very reason and visibility is the whole answer.
+    const vis = subjects?.length ? null : gitVisibility(dirname(gf.path), gf.path);
+    const commits = subjects?.length
       ? `  ${subjects.length} commit${subjects.length === 1 ? "" : "s"}: ${subjects.join("; ")}`
-      : `  ${NO_COMMITS[gitVisibility(dirname(gf.path), gf.path)]}`;
+      : `  ${NO_COMMITS[subjects === null && vis === "tracked" ? "unknown" : vis!]}`;
     out(`  ${displayPath(projectDir, gf.path)}  ${status}${commits}`);
   }
   // Only when the hash actually moved. A file edited and reverted within the session

@@ -13,6 +13,9 @@ export type GitInfo = {
   inRepo: boolean;
   lastCommit: { author: string; date: string } | null;
   dirty: boolean;
+  /** A call past the repo check failed, so a null `lastCommit` or a false `dirty`
+   *  is not an answer. Unset means every call answered. */
+  unknown?: true;
 };
 
 /**
@@ -53,19 +56,20 @@ export function getGitInfo(projectDir: string, filePath: string): GitInfo {
   const status = git(projectDir, ["status", "--porcelain", "--", filePath]);
   const dirty = status.code === 0 && status.stdout.trim().length > 0;
 
-  return { inRepo, lastCommit, dirty };
+  // A failed log rendered as "untracked" and a failed status as clean.
+  const unknown = log.code !== 0 || status.code !== 0;
+  return { inRepo, lastCommit, dirty, ...(unknown ? { unknown: true as const } : {}) };
 }
 
 /**
- * Subjects of commits touching `filePath` after `iso`, newest first.
- *
- * Empty means either no commits in the window or not a repo — for the caller's
- * purpose (describing a change the user already made) both read the same, and the
- * file's own mtime is what established that a change happened at all.
+ * Subjects of commits touching `filePath` after `iso`, newest first. Empty is git's
+ * answer that there were none; null is no answer. They were one value until
+ * `gitVisibility` began telling a tracked file's "no commits in window" apart, and
+ * then a failed log for a tracked file printed that as if git had looked.
  */
-export function commitsTouching(projectDir: string, filePath: string, iso: string): string[] {
+export function commitsTouching(projectDir: string, filePath: string, iso: string): string[] | null {
   const r = git(projectDir, ["log", "--format=%s", `--since=${iso}`, "--", filePath]);
-  if (r.code !== 0) return [];
+  if (r.code !== 0) return null;
   return r.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
 }
 

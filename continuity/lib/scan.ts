@@ -195,24 +195,25 @@ export function gitChangedSince(cwd: string, iso: string): string[] | null {
   // `--porcelain` is stable across git versions by contract; `-z` avoids the quoting
   // it applies to paths with spaces. XY status is the first two bytes, path the rest.
   const dirty = git("status", "--porcelain", "-z");
+  // The list's contract is commits AND dirty work. Without the second half a
+  // commits-only list reads as complete, so a failed status is "could not answer".
+  if (dirty.status !== 0) return null;
 
   const seen = new Set<string>();
   for (const f of log.stdout.split("\n")) {
     const t = f.trim();
     if (t) seen.add(t);
   }
-  if (dirty.status === 0) {
-    const cutoff = Date.parse(iso);
-    // A rename emits two NUL fields: `R  <dest>` then a bare `<src>` with no status
-    // bytes. Rather than track which field is which, take a path off either shape ---
-    // the source of a rename did change, so keeping it is right, not a leak.
-    for (const rec of dirty.stdout.split("\0")) {
-      if (!rec) continue;
-      const rel = /^[ MADRCU?!]{2} /.test(rec) ? rec.slice(3) : rec;
-      let m: number;
-      try { m = statSync(join(loc.top, rel)).mtimeMs; } catch { seen.add(rel); continue; }
-      if (m > cutoff) seen.add(rel);
-    }
+  const cutoff = Date.parse(iso);
+  // A rename emits two NUL fields: `R  <dest>` then a bare `<src>` with no status
+  // bytes. Rather than track which field is which, take a path off either shape ---
+  // the source of a rename did change, so keeping it is right, not a leak.
+  for (const rec of dirty.stdout.split("\0")) {
+    if (!rec) continue;
+    const rel = /^[ MADRCU?!]{2} /.test(rec) ? rec.slice(3) : rec;
+    let m: number;
+    try { m = statSync(join(loc.top, rel)).mtimeMs; } catch { seen.add(rel); continue; }
+    if (m > cutoff) seen.add(rel);
   }
   // The wrap writes this cwd's pointer inside the session window, so it always
   // qualified and reported the scan's own artifact as session work. A pointer in any

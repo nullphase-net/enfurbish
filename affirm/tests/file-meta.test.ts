@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, utimesSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getMtime, getGitInfo } from "../lib/file-meta";
+import { commitsTouching, getMtime, getGitInfo } from "../lib/file-meta";
 
 function gitInit(dir: string) {
   spawnSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
@@ -59,6 +59,48 @@ test("getGitInfo flags dirty when the file has uncommitted changes", () => {
   const info = getGitInfo(dir, f);
   expect(info.inRepo).toBe(true);
   expect(info.dirty).toBe(true);
+});
+
+// Two real-git failure stimuli, measured on git 2.x (2026-09-26): garbage in
+// .git/index makes status, ls-files and check-ignore exit 128 while log still works;
+// a branch ref naming a missing object makes log and status exit 128 while ls-files
+// and check-ignore still work. A failed call must read as unknown, not as "no".
+function committed(prefix: string): { dir: string; f: string } {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  gitInit(dir);
+  const f = join(dir, "x.md");
+  writeFileSync(f, "v1");
+  spawnSync("git", ["add", "."], { cwd: dir });
+  spawnSync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
+  return { dir, f };
+}
+
+test("getGitInfo marks a failed git status unknown, not clean", () => {
+  const { dir, f } = committed("file-meta-badindex-");
+  writeFileSync(join(dir, ".git", "index"), "garbage");
+  const info = getGitInfo(dir, f);
+  expect(info.lastCommit?.author).toBe("Test User");
+  expect(info.unknown).toBe(true);
+});
+
+test("getGitInfo marks a failed git log unknown, not untracked", () => {
+  const { dir, f } = committed("file-meta-badref-");
+  writeFileSync(join(dir, ".git", "refs", "heads", "main"), "1234567890123456789012345678901234567890\n");
+  const info = getGitInfo(dir, f);
+  expect(info.lastCommit).toBeNull();
+  expect(info.unknown).toBe(true);
+});
+
+test("getGitInfo leaves unknown unset when every call answered", () => {
+  const { dir, f } = committed("file-meta-ok-");
+  expect(getGitInfo(dir, f).unknown).toBeUndefined();
+});
+
+test("commitsTouching returns null when git log fails, which is not []", () => {
+  const { dir, f } = committed("file-meta-touch-");
+  expect(commitsTouching(dir, f, "2020-01-01T00:00:00Z")).toEqual(["init"]);
+  writeFileSync(join(dir, ".git", "refs", "heads", "main"), "1234567890123456789012345678901234567890\n");
+  expect(commitsTouching(dir, f, "2020-01-01T00:00:00Z")).toBeNull();
 });
 
 test("getGitInfo returns lastCommit=null for untracked file in a repo", () => {

@@ -575,6 +575,16 @@ test("gitChangedSince from a subdirectory drops its own pointer and keeps the ro
   expect(got).toEqual(["NEXT_SESSION.md"]);
 });
 
+// Two real-git failure stimuli, measured on git 2.x (2026-09-26): garbage in
+// .git/index makes status, ls-files and check-ignore exit 128 while log still works;
+// a branch ref naming a missing object makes log and status exit 128 while ls-files
+// and check-ignore still work. A failed call must read as unknown, not as "no".
+test("gitChangedSince returns null when only its dirty half fails, not a commits-only list", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, ".git", "index"), "garbage");
+  expect(gitChangedSince(root, "2026-08-18T17:00:00-05:00")).toBe(null);
+});
+
 test("gitChangedSince returns null when git cannot answer, which is not []", () => {
   const bare = mkdtempSync(join(tmpdir(), "scan-nogit-"));
   expect(gitChangedSince(bare, "2026-08-18T17:00:00-05:00")).toBe(null);

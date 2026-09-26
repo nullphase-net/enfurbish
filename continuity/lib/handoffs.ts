@@ -412,10 +412,13 @@ export function windowSince(root: string, path: string, limit = 25): string {
   if (log.status !== 0) {
     // `git log` also exits non-zero on a repo that has no commits yet. Same class of
     // answer — the window is unknown either way — but the reason is a different fact
-    // and reporting the wrong one sends the reader looking for a missing `.git`.
-    const why = git("rev-parse", "--git-dir").status === 0
-      ? `no commits yet in ${root}`
-      : `not a git repo: ${root}`;
+    // and reporting the wrong one sends the reader looking for a missing `.git`. The
+    // reason comes from git's own words; "is a repo" alone guessed "no commits yet"
+    // for a repo whose HEAD named a missing object.
+    const err = log.stderr ?? "";
+    const why = /does not have any commits yet/.test(err) ? `no commits yet in ${root}`
+      : /not a git repository/.test(err) ? `not a git repo: ${root}`
+      : `git log failed: ${err.trim().split("\n")[0] || `exit ${log.status}`}`;
     return `${why} — window unknown`;
   }
 
@@ -436,21 +439,25 @@ export function windowSince(root: string, path: string, limit = 25): string {
   const st = git("status", "--porcelain", "-z");
   const cutoff = Date.parse(iso);
   const self = resolve(path);
-  const dirty = st.status !== 0 ? 0 : st.stdout.split("\0").filter(rec => {
+  // A failed status is unknown, not clean: counted as 0 it printed the all-clear.
+  const dirty = st.status !== 0 ? null : st.stdout.split("\0").filter(rec => {
     if (!rec) return false;
     const rel = /^[ MADRCU?!]{2} /.test(rec) ? rec.slice(3) : rec;
     if (resolve(root, rel) === self) return false;
     try { return statSync(join(root, rel)).mtimeMs > cutoff; } catch { return true; }
   }).length;
-  const dirtyNote = dirty ? ` · ${dirty} uncommitted` : "";
+  const dirtyNote = dirty === null ? " · uncommitted unknown" : dirty ? ` · ${dirty} uncommitted` : "";
 
   const commits = log.stdout.split("\n").filter(l => l.trim());
   if (commits.length === 0) {
-    return `0 commits since ${iso}${dirtyNote} — handoff ${dirty ? "predates uncommitted work" : "still describes HEAD"}`;
+    const verdict = dirty === null ? "git status failed, so whether it still describes the tree is unknown"
+      : dirty ? "handoff predates uncommitted work" : "handoff still describes HEAD";
+    return `0 commits since ${iso}${dirtyNote} — ${verdict}`;
   }
 
   const names = git("log", "--name-only", "--pretty=format:", `--since=${iso}`);
-  const files = [...new Set(names.stdout.split("\n").map(l => l.trim()).filter(Boolean))].sort();
+  const files = names.status !== 0 ? null
+    : [...new Set(names.stdout.split("\n").map(l => l.trim()).filter(Boolean))].sort();
 
   // A file edited after its header — the report's `+Nh after header` — was most likely
   // reconciled by hand without --header, so it already absorbed some of the commits
@@ -466,13 +473,16 @@ export function windowSince(root: string, path: string, limit = 25): string {
 
   const shown = commits.slice(0, limit);
   const out = [
-    `${plural(commits.length)} · ${files.length} file${files.length === 1 ? "" : "s"}${dirtyNote} since ${iso}`,
+    `${plural(commits.length)} · ${files === null ? "files unknown" : `${files.length} file${files.length === 1 ? "" : "s"}`}${dirtyNote} since ${iso}`,
     ...edit,
     ...shown.map(c => `  ${c}`),
     ...(commits.length > shown.length ? [`  +${commits.length - shown.length} older`] : []),
   ];
-  const head = files.slice(0, 40);
-  out.push(`files: ${head.join("  ")}${files.length > head.length ? `  +${files.length - head.length} more` : ""}`);
+  if (files === null) out.push("files: unknown (git log --name-only failed)");
+  else {
+    const head = files.slice(0, 40);
+    out.push(`files: ${head.join("  ")}${files.length > head.length ? `  +${files.length - head.length} more` : ""}`);
+  }
   return out.join("\n");
 }
 

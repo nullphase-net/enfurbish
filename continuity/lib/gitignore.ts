@@ -10,7 +10,9 @@ function git(cwd: string, args: string[]): { code: number; stdout: string } {
     encoding: "utf8",
     timeout: 5000,
   });
-  return { code: r.status ?? 1, stdout: r.stdout ?? "" };
+  // A timeout leaves status null. -1 is a code git never exits with, so a timeout
+  // can never pass for the documented 1 ("no") that check-ignore and ls-files use.
+  return { code: r.status ?? -1, stdout: r.stdout ?? "" };
 }
 
 /**
@@ -43,22 +45,21 @@ export function getIgnoredDirs(projectRoot: string): Set<string> {
   return out;
 }
 
-/**
- * `git check-ignore -q <relPath>` returns exit 0 iff the path is gitignored.
- * Returns false on any other exit (including non-git-repo, file not present, etc.).
- */
-export function isFileIgnored(projectRoot: string, relPath: string): boolean {
-  const r = git(projectRoot, ["check-ignore", "-q", "--", relPath]);
-  return r.code === 0;
-}
+/** git's documented yes (0) / no (1) as a boolean; any other exit is null, unknown. */
+const answer = (code: number): boolean | null => (code === 0 ? true : code === 1 ? false : null);
 
 /**
- * `git ls-files --error-unmatch <relPath>` returns exit 0 iff the path is
- * tracked. Returns false on any other exit.
+ * `git check-ignore -q <relPath>`: true if gitignored, false if not, null when git
+ * could not answer (a corrupt index exits 128, a timeout -1). Reading those as
+ * false suggested gitignoring a file git had never looked at.
  */
-export function isFileTracked(projectRoot: string, relPath: string): boolean {
-  const r = git(projectRoot, ["ls-files", "--error-unmatch", "--", relPath]);
-  return r.code === 0;
+export function isFileIgnored(projectRoot: string, relPath: string): boolean | null {
+  return answer(git(projectRoot, ["check-ignore", "-q", "--", relPath]).code);
+}
+
+/** `git ls-files --error-unmatch <relPath>`: tracked, not, or null when unknown. */
+export function isFileTracked(projectRoot: string, relPath: string): boolean | null {
+  return answer(git(projectRoot, ["ls-files", "--error-unmatch", "--", relPath]).code);
 }
 
 function isInRepo(projectRoot: string): boolean {
@@ -68,8 +69,9 @@ function isInRepo(projectRoot: string): boolean {
 function suggestLine(projectRoot: string, relPath: string, forWrite: boolean): string {
   if (!forWrite) return "";
   if (!isInRepo(projectRoot)) return "";
-  if (isFileIgnored(projectRoot, relPath)) return "";
-  if (isFileTracked(projectRoot, relPath)) return "";
+  // Only on git's own "no" to both. Unknown is not a reason to suggest anything.
+  if (isFileIgnored(projectRoot, relPath) !== false) return "";
+  if (isFileTracked(projectRoot, relPath) !== false) return "";
   return `  Note: ${relPath} isn't gitignored — consider adding \`${relPath}\` to .gitignore so it stays out of commits.`;
 }
 

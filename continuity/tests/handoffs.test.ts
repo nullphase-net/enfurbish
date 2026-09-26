@@ -467,6 +467,32 @@ test("windowSince adds no second window when the file matches its header", () =>
   expect(windowSince(root, p)).not.toContain("since last edit");
 });
 
+// Two real-git failure stimuli, measured on git 2.x (2026-09-26): garbage in
+// .git/index makes status, ls-files and check-ignore exit 128 while log still works;
+// a branch ref naming a missing object makes log and status exit 128 while ls-files
+// and check-ignore still work. A failed call must read as unknown, not as "no".
+test("windowSince does not read a failed git status as a clean tree", () => {
+  const root = repoWithCommits(COMMITS);
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, HANDOFF("2026-08-18T20:00:00-05:00"));
+  writeFileSync(join(root, ".git", "index"), "garbage");
+  const out = windowSince(root, p);
+  expect(out).toContain("0 commits");
+  expect(out).toContain("uncommitted unknown");
+  expect(out).not.toContain("still describes HEAD");
+});
+
+test("windowSince names a failed git log instead of guessing 'no commits yet'", () => {
+  const root = repoWithCommits(COMMITS);
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, HANDOFF("2026-08-18T17:00:00-05:00"));
+  writeFileSync(join(root, ".git", "refs", "heads", "main"), "1234567890123456789012345678901234567890\n");
+  const out = windowSince(root, p);
+  expect(out).toContain("git log failed: fatal: bad object HEAD");
+  expect(out).toContain("window unknown");
+  expect(out).not.toContain("no commits yet");
+});
+
 // The other direction: a current handoff must read as an all-clear, not as silence.
 test("windowSince says 0 and says the handoff still describes HEAD", () => {
   const root = repoWithCommits(COMMITS);

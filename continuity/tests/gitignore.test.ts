@@ -129,6 +129,27 @@ test("CLI --suggest-line --for-write prints suggestion when all conditions hold"
   }
 });
 
+// Two real-git failure stimuli, measured on git 2.x (2026-09-26): garbage in
+// .git/index makes status, ls-files and check-ignore exit 128 while log still works;
+// a branch ref naming a missing object makes log and status exit 128 while ls-files
+// and check-ignore still work. A failed call must read as unknown, not as "no".
+test("CLI --suggest-line --for-write says nothing when git cannot answer", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gitignore-cli-broken-"));
+  const fx = gitInitClean(dir);
+  try {
+    writeFileSync(join(dir, "NEXT_SESSION.md"), "handoff");
+    writeFileSync(join(dir, ".git", "index"), "garbage");
+    const r = spawnSync("bun", ["run", CLI, "--suggest-line", "NEXT_SESSION.md", "--for-write"], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe("");
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test("CLI --suggest-line --for-write prints empty when the file is tracked", () => {
   const dir = mkdtempSync(join(tmpdir(), "gitignore-cli-tracked-"));
   const fx = gitInitClean(dir);

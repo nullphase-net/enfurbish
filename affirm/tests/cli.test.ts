@@ -398,6 +398,19 @@ test("--since says a file outside any repo is outside any repo", () => {
   expect(line).not.toContain("no commits in window");
 });
 
+// A branch ref naming a missing object makes `git log` exit 128 while ls-files still
+// reports the file tracked, so "no commits in window" was printed from a failed query.
+test("--since says git state unknown when the commit query fails for a tracked file", () => {
+  const { dir, hashPath } = projectWithClaudeMd("# rules\n");
+  gitInit(dir);
+  spawnSync("git", ["add", "CLAUDE.md"], { cwd: dir });
+  spawnSync("git", ["commit", "-q", "-m", "c"], { cwd: dir });
+  writeFileSync(join(dir, ".git", "refs", "heads", "main"), "1234567890123456789012345678901234567890\n");
+  const line = sinceLine(dir, hashPath);
+  expect(line).toContain("git state unknown");
+  expect(line).not.toContain("no commits in window");
+});
+
 // The other direction: for a tracked file the old words were true, and stay.
 test("--since keeps 'no commits in window' for a tracked file committed before it", () => {
   const { dir, hashPath } = projectWithClaudeMd("# rules\n");

@@ -44,8 +44,12 @@ function annot(projectDir: string, m: FileMeta | undefined): string {
 
 function gitDetail(git: GitInfo): string {
   if (!git.inRepo) return "";
-  if (!git.lastCommit) return git.dirty ? " · untracked (uncommitted)" : " · untracked";
+  if (!git.lastCommit) {
+    if (git.unknown) return " · git state unknown";
+    return git.dirty ? " · untracked (uncommitted)" : " · untracked";
+  }
   const base = ` · ${git.lastCommit.author}, ${git.lastCommit.date}`;
+  if (git.unknown) return `${base} (working tree state unknown)`;
   return git.dirty ? `${base} (uncommitted)` : base;
 }
 
