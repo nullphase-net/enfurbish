@@ -19,11 +19,11 @@ See [continuity/README.md](./continuity/README.md) for the tooling-journal forma
 
 ### [`affirm/`](./affirm) — approval gate for project instructions
 
-A speed-bump against prompt injection through `CLAUDE.md`, `.claude/rules/*`, and the files those reach via `@import` (followed two levels deep; imports pointing outside the project are hashed and flagged).
+A speed-bump against prompt injection through the instruction files Claude Code loads at launch — `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules/*` and, when it loads, `AGENTS.md`, from the launch directory and every directory above it — and the files those reach via `@import` (followed four hops, as Claude Code does; imports pointing outside the project are hashed and flagged).
 
 - **`SessionStart` hook** lists project instruction files and warns on any unaffirmed or modified file.
 - **`/affirm`** shows what's in scope with status, mtime, and git provenance.
-- **`/affirm -a`** records SHA-256 hashes after you've reviewed. Scope covers the project's `CLAUDE.md` / `.claude/rules/*` and the user-global ones under `~/.claude/`; globals stay out of the banner while they still match.
+- **`/affirm -a`** records SHA-256 hashes after you've reviewed. Scope covers the project's instruction files and the user-global ones under `~/.claude/`; globals stay out of the banner while they still match.
 - **`--since <iso>`** lists only what moved inside a window. `continuity`'s `/wrap` runs it with the session's start time, so a change you made yourself is summarized at the end of that session rather than surfacing as a trust warning at the start of the next one.
 
 See [affirm/README.md](./affirm/README.md) for the threat model and storage details.

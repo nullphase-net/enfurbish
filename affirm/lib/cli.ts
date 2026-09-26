@@ -7,7 +7,7 @@ import {
   normalizeProjectDir,
   sha256OfFile,
 } from "./affirm";
-import { buildInstructionGraph, displayPath, type InstructionGraph } from "./imports";
+import { MAX_IMPORT_DEPTH, buildInstructionGraph, displayPath, type InstructionGraph } from "./imports";
 import {
   commitsTouching,
   getGitInfo,
@@ -57,12 +57,13 @@ function renderDetails(
     if (git !== null) out(`    git:      ${git}`);
     if (gf.via) out(`    import:   from ${displayPath(projectDir, gf.via)} (depth ${gf.depth})`);
     if (gf.global) out(`    scope:    global`);
+    else if (gf.ancestor) out(`    scope:    ancestor`);
     else if (gf.outOfTree) out(`    scope:    out-of-tree`);
     out("");
   }
   if (graph.deep.length > 0) {
     const list = graph.deep.map((d) => `${displayPath(projectDir, d.via)} → ${d.raw}`).join(", ");
-    out(`@imports beyond depth 2 (not tracked): ${list}`);
+    out(`@imports beyond depth ${MAX_IMPORT_DEPTH} (not tracked): ${list}`);
     out("");
   }
   out("Run /affirm -a to record current hashes.");
@@ -94,8 +95,11 @@ export function renderSince(
   }
   const touched = graph.files.filter((gf) => (getMtime(gf.path) ?? 0) > cutoff);
   const total = graph.files.length;
+  // Name what was tracked: a file edited outside the scope also reads "0 of N", and
+  // only the list shows that it was never counted.
   if (touched.length === 0) {
-    out(`0 of ${total} instruction file${total === 1 ? "" : "s"} touched since ${iso}`);
+    const tracked = graph.files.map((gf) => displayPath(projectDir, gf.path)).sort();
+    out(`0 of ${total} instruction file${total === 1 ? "" : "s"} touched since ${iso}: ${tracked.join(", ")}`);
     return;
   }
 
@@ -159,7 +163,7 @@ export function runCli(argv: string[], opts: CliOpts): number {
   const projectDir = normalizeProjectDir(opts.cwd);
   const graph = buildInstructionGraph(projectDir);
   if (graph.files.length === 0) {
-    opts.out(`No CLAUDE.md or .claude/rules/ files found in ${projectDir}`);
+    opts.out(`No instruction files load in ${projectDir} (CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md, .claude/rules/, AGENTS.md; here or above)`);
     return 0;
   }
 

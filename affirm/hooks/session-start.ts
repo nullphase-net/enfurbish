@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { classify, loadHashes, normalizeProjectDir } from "../lib/affirm";
-import { buildInstructionGraph, displayPath, type DeepImport } from "../lib/imports";
+import { MAX_IMPORT_DEPTH, buildInstructionGraph, displayPath, type DeepImport } from "../lib/imports";
 import { getGitInfo, getMtime, type GitInfo } from "../lib/file-meta";
 import { humanizeDelta } from "../lib/humanize";
 import { markFirstFire } from "../lib/first-fire";
@@ -13,6 +13,7 @@ export type FileMeta = {
   via: string | null;
   outOfTree: boolean;
   global: boolean;
+  ancestor: boolean;
   mtimeMs: number | null;
   git: GitInfo;
 };
@@ -27,14 +28,16 @@ export type BannerInput = {
   channel?: "user" | "model";
 };
 
-// `@from <ref>` / `(global)` / `(out-of-tree)` provenance, shown on every state.
-// A global root is out of the tree too, but that is its normal place — `(out-of-tree)`
-// reads as a warning about an import that escaped, so globals get their own word.
+// `@from <ref>` / `(global)` / `(ancestor)` / `(out-of-tree)` provenance, shown on every
+// state. Global and ancestor roots are out of the tree too, but that is their normal
+// place — `(out-of-tree)` reads as a warning about an import that escaped, so they get
+// their own words.
 function annot(projectDir: string, m: FileMeta | undefined): string {
   if (!m) return "";
   let a = "";
   if (m.via) a += ` ← @from ${displayPath(projectDir, m.via)}`;
   if (m.global) a += " (global)";
+  else if (m.ancestor) a += " (ancestor)";
   else if (m.outOfTree) a += " (out-of-tree)";
   return a;
 }
@@ -57,7 +60,7 @@ function deepSummary(projectDir: string, deep: DeepImport[]): string {
   const items = deep.slice(0, CAP).map((d) => `${displayPath(projectDir, d.via)} → ${d.raw}`);
   const more = deep.length > CAP ? `, +${deep.length - CAP} more` : "";
   const plural = deep.length === 1 ? "" : "s";
-  return `ℹ ${deep.length} @import${plural} beyond depth 2 not tracked: ${items.join(", ")}${more}`;
+  return `ℹ ${deep.length} @import${plural} beyond depth ${MAX_IMPORT_DEPTH} not tracked: ${items.join(", ")}${more}`;
 }
 
 export function buildBanner(input: BannerInput): string {
@@ -147,6 +150,7 @@ if (import.meta.main) {
         via: gf.via,
         outOfTree: gf.outOfTree,
         global: gf.global,
+        ancestor: gf.ancestor,
         mtimeMs: null,
         git: { inRepo: false, lastCommit: null, dirty: false },
       };

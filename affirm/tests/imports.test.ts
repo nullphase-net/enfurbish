@@ -98,7 +98,7 @@ test("graph: root CLAUDE.md only", () => {
   writeFileSync(join(dir, "CLAUDE.md"), "no imports here");
   const g = buildInstructionGraph(dir);
   expect(g.files).toEqual([
-    { path: join(dir, "CLAUDE.md"), depth: 0, via: null, outOfTree: false, global: false },
+    { path: join(dir, "CLAUDE.md"), depth: 0, via: null, outOfTree: false, global: false, ancestor: false },
   ]);
   expect(g.deep).toEqual([]);
 });
@@ -115,17 +115,22 @@ test("graph: follows a one-level import", () => {
   expect(extra!.outOfTree).toBe(false);
 });
 
-test("graph: follows imports to depth 2, summarizes deeper", () => {
+// Claude Code follows four hops: measured 2026-09-26 on 2.1.283, a chain i1..i5 from a
+// CLAUDE.local.md loaded i1-i4 and not i5. affirm followed two, so i3 and i4 loaded unhashed.
+test("graph: follows imports to depth 4, summarizes deeper", () => {
   const dir = mkProj();
   writeFileSync(join(dir, "CLAUDE.md"), "@a.md");
   writeFileSync(join(dir, "a.md"), "@b.md"); // depth 1
   writeFileSync(join(dir, "b.md"), "@c.md"); // depth 2
-  writeFileSync(join(dir, "c.md"), "deep"); // depth 3 — not followed
+  writeFileSync(join(dir, "c.md"), "@d.md"); // depth 3
+  writeFileSync(join(dir, "d.md"), "@e.md"); // depth 4
+  writeFileSync(join(dir, "e.md"), "deep"); // depth 5 — not followed
   const g = buildInstructionGraph(dir);
   const paths = g.files.map((f) => f.path);
-  expect(paths).toContain(join(dir, "b.md"));
-  expect(paths).not.toContain(join(dir, "c.md"));
-  expect(g.deep).toEqual([{ via: join(dir, "b.md"), raw: "c.md" }]);
+  expect(paths).toContain(join(dir, "c.md"));
+  expect(paths).toContain(join(dir, "d.md"));
+  expect(paths).not.toContain(join(dir, "e.md"));
+  expect(g.deep).toEqual([{ via: join(dir, "d.md"), raw: "e.md" }]);
 });
 
 test("graph: cycle does not loop forever", () => {
@@ -165,8 +170,161 @@ test("graph: relative imports resolve against the importing file", () => {
   expect(paths).toContain(join(dir, ".claude", "rules", "sibling.md"));
 });
 
-test("MAX_IMPORT_DEPTH is 2", () => {
-  expect(MAX_IMPORT_DEPTH).toBe(2);
+test("MAX_IMPORT_DEPTH is 4", () => {
+  expect(MAX_IMPORT_DEPTH).toBe(4);
+});
+
+// ---------- every root Claude Code loads at launch ----------
+// Measured 2026-09-26 on Claude Code 2.1.283 (InstructionsLoaded hook log and the model's
+// own recall agreed): from a launch dir two levels under a non-repo parent, every directory
+// up the tree loaded CLAUDE.md, .claude/CLAUDE.md, .claude/rules/** and CLAUDE.local.md.
+
+function rootPaths(dir: string): string[] {
+  return buildInstructionGraph(dir).files.map((f) => f.path);
+}
+
+function write(path: string, body = "x") {
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, body);
+}
+
+for (const name of ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"]) {
+  test(`graph: ${name} alone is a root`, () => {
+    const dir = mkProj();
+    write(join(dir, name));
+    const g = buildInstructionGraph(dir);
+    expect(g.files.map((f) => [f.path, f.depth, f.ancestor])).toEqual([[join(dir, name), 0, false]]);
+  });
+}
+
+test("graph: CLAUDE.local.md @imports are followed", () => {
+  const dir = mkProj();
+  write(join(dir, "CLAUDE.local.md"), "@mine.md");
+  write(join(dir, "mine.md"));
+  expect(rootPaths(dir)).toContain(join(dir, "mine.md"));
+});
+
+test("graph: every ancestor's roots are collected and marked ancestor", () => {
+  const top = mkProj();
+  const sub = join(top, "repo", "sub");
+  mkdirSync(sub, { recursive: true });
+  const expected = [
+    join(top, "CLAUDE.md"),
+    join(top, ".claude", "CLAUDE.md"),
+    join(top, "CLAUDE.local.md"),
+    join(top, ".claude", "rules", "r.md"),
+    join(top, "repo", "CLAUDE.md"),
+    join(top, "repo", ".claude", "rules", "deep", "r.md"),
+  ];
+  for (const p of expected) write(p);
+  const files = buildInstructionGraph(sub).files;
+  const byPath = Object.fromEntries(files.map((f) => [f.path, f]));
+  for (const p of expected) {
+    expect(byPath[p]).toBeDefined();
+    expect(byPath[p]!.ancestor).toBe(true);
+    expect(byPath[p]!.outOfTree).toBe(true);
+    expect(byPath[p]!.global).toBe(false);
+  }
+});
+
+test("graph: an ancestor's imports are followed but are not themselves ancestors", () => {
+  const top = mkProj();
+  const sub = join(top, "sub");
+  mkdirSync(sub);
+  write(join(top, "CLAUDE.md"), "@docs/x.md");
+  write(join(top, "docs", "x.md"));
+  const x = buildInstructionGraph(sub).files.find((f) => f.path === join(top, "docs", "x.md"));
+  expect(x?.via).toBe(join(top, "CLAUDE.md"));
+  expect(x?.ancestor).toBe(false);
+});
+
+// A project under $HOME reaches ~/.claude/CLAUDE.md as an ancestor's .claude/CLAUDE.md.
+// It must stay global, or it shows a ✓ line in every banner again.
+test("graph: a global root reached as an ancestor file stays global, once", () => {
+  const home = mkProj();
+  const g = join(home, ".claude");
+  write(join(g, "CLAUDE.md"));
+  write(join(g, "rules", "r.md"));
+  const proj = join(home, "proj");
+  mkdirSync(proj);
+  const files = withGlobalDir(g, () => buildInstructionGraph(proj).files);
+  for (const p of [join(g, "CLAUDE.md"), join(g, "rules", "r.md")]) {
+    const hits = files.filter((f) => f.path === p);
+    expect(hits.length).toBe(1);
+    expect(hits[0]!.global).toBe(true);
+    expect(hits[0]!.ancestor).toBe(false);
+  }
+});
+
+// ---------- AGENTS.md: loads only when no CLAUDE.md-family file does ----------
+// Docs (memory, "When Claude Code reads AGENTS.md"), and measured 2026-09-26: AGENTS.md
+// loaded from a dir with nothing else, and was skipped beside a CLAUDE.md.
+
+for (const name of ["AGENTS.md", ".claude/AGENTS.md"]) {
+  test(`graph: ${name} with no CLAUDE.md-family file is a root`, () => {
+    const dir = mkProj();
+    write(join(dir, name), "@more.md");
+    const more = join(dir, name, "..", "more.md"); // relative to the importing file
+    write(more);
+    expect(rootPaths(dir)).toEqual([join(dir, name), realpathSync(more)]);
+  });
+}
+
+// One case per shape that suppresses it, here and in an ancestor.
+for (const name of ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"]) {
+  test(`graph: AGENTS.md is not a root beside ${name}`, () => {
+    const dir = mkProj();
+    write(join(dir, "AGENTS.md"));
+    write(join(dir, name));
+    expect(rootPaths(dir)).toEqual([join(dir, name)]);
+  });
+  test(`graph: AGENTS.md is not a root under an ancestor's ${name}`, () => {
+    const top = mkProj();
+    const sub = join(top, "sub");
+    write(join(sub, "AGENTS.md"));
+    write(join(top, name));
+    expect(rootPaths(sub)).not.toContain(join(sub, "AGENTS.md"));
+  });
+}
+
+// ...and per shape that does not: the global CLAUDE.md and rules files don't count.
+test("graph: AGENTS.md is still a root beside a rules file and a global CLAUDE.md", () => {
+  const g = mkGlobal("affirm-gdir-agents-");
+  write(join(g, "CLAUDE.md"));
+  const dir = mkProj();
+  write(join(dir, "AGENTS.md"));
+  write(join(dir, ".claude", "rules", "r.md"));
+  expect(withGlobalDir(g, () => rootPaths(dir))).toContain(join(dir, "AGENTS.md"));
+});
+
+function withSetting<T>(instructionFiles: string, fn: (g: string) => T): T {
+  const g = mkGlobal("affirm-gdir-setting-");
+  const settings = { pluginConfigs: { "agents-md@builtin": { options: { instructionFiles } } } };
+  writeFileSync(join(g, "settings.json"), JSON.stringify(settings));
+  return withGlobalDir(g, () => fn(g));
+}
+
+test("graph: claude-md-and-agents-md makes AGENTS.md a root beside CLAUDE.md", () => {
+  const dir = mkProj();
+  write(join(dir, "CLAUDE.md"));
+  write(join(dir, "AGENTS.md"));
+  expect(withSetting("claude-md-and-agents-md", () => rootPaths(dir))).toContain(join(dir, "AGENTS.md"));
+});
+
+for (const mode of ["claude-md", "managed-only"]) {
+  test(`graph: ${mode} leaves AGENTS.md out even alone`, () => {
+    const dir = mkProj();
+    write(join(dir, "AGENTS.md"));
+    expect(withSetting(mode, () => rootPaths(dir))).toEqual([]);
+  });
+}
+
+// A value this code does not know is not the negative case: watch the file.
+test("graph: an unknown instructionFiles value keeps AGENTS.md watched", () => {
+  const dir = mkProj();
+  write(join(dir, "CLAUDE.md"));
+  write(join(dir, "AGENTS.md"));
+  expect(withSetting("some-future-mode", () => rootPaths(dir))).toContain(join(dir, "AGENTS.md"));
 });
 
 // ---------- global roots ----------

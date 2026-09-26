@@ -27,7 +27,8 @@ export function sha256OfFile(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-// Roots (CLAUDE.md + .claude/rules/**) plus any files they @import, transitively.
+// Every root Claude Code loads at launch (the list, with its sources, is at
+// collectRoots in ./imports) plus any files they @import, four hops.
 // The full graph (depth/provenance/out-of-tree/global) lives in ./imports; classify and
 // approve only need the flat path list.
 export function collectInstructionFiles(projectDir: string): string[] {

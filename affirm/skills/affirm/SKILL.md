@@ -1,11 +1,11 @@
 ---
 name: affirm
-description: Affirm or show trust in the CLAUDE.md, .claude/rules/* files (project and user-global) and the files they @import. Use after reviewing changes flagged by the SessionStart hook. Invoke as /affirm.
+description: Affirm or show trust in the instruction files Claude Code loads (CLAUDE.md, CLAUDE.local.md, .claude/rules/*, AGENTS.md; project, parent dirs and user-global) and the files they @import. Use after reviewing changes flagged by the SessionStart hook. Invoke as /affirm.
 ---
 
 # `/affirm` — affirm instruction files
 
-`CLAUDE.md`, anything under `.claude/rules/`, and any files they pull in via Claude Code's `@import` syntax are loaded as Claude's system instructions. That holds for the project's own files and for the user-global ones under `~/.claude/`, and a malicious or accidental change to either can silently re-program Claude. `/affirm` is the explicit trust gate: bare `/affirm` shows you what's there; `/affirm -a` records SHA-256 hashes once you've reviewed; `/affirm --since <iso>` reports only what moved after a timestamp. The SessionStart hook compares stored hashes on every session start and warns on any mismatch.
+`CLAUDE.md`, `CLAUDE.local.md`, anything under `.claude/rules/`, and any files they pull in via Claude Code's `@import` syntax are loaded as Claude's system instructions. That holds for the project's own files and for the user-global ones under `~/.claude/`, and a malicious or accidental change to either can silently re-program Claude. `/affirm` is the explicit trust gate: bare `/affirm` shows you what's there; `/affirm -a` records SHA-256 hashes once you've reviewed; `/affirm --since <iso>` reports only what moved after a timestamp. The SessionStart hook compares stored hashes on every session start and warns on any mismatch.
 
 ## Procedure
 
@@ -49,7 +49,7 @@ Relay the output.
 
 - Read the contents of `CLAUDE.md` or rules files. That's the user's job — they're the one attesting.
 - Modify any instruction file. Affirmation is hash-only.
-- Affirm files nothing loads. Scope is `<cwd>/CLAUDE.md` + `<cwd>/.claude/rules/*`, the user-global `~/.claude/CLAUDE.md` + `~/.claude/rules/*`, and whatever any of them `@import` (followed two levels deep; an import pointing outside the project is hashed but flagged out-of-tree). Nested subdirectory CLAUDE.md files are still out of scope unless a tracked file imports one.
+- Affirm files nothing loads. Scope is what Claude Code loads at launch: `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and `.claude/rules/*` in the cwd and every directory above it (parents marked `ancestor`), `AGENTS.md` where Claude Code reads it, the user-global `~/.claude/CLAUDE.md` + `~/.claude/rules/*`, and whatever any of them `@import` (four hops, Claude Code's own cap; an import pointing outside the project is hashed but flagged out-of-tree). Subdirectory files below the cwd load on demand and are out of scope unless a tracked file imports one.
 - Prompt the user "are you sure?". The flag is the attestation.
 - Run `-a` unprompted. The attestation is the user's; an assistant affirming the instructions it is running under defeats the gate.
 

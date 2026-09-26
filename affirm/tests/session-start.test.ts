@@ -12,6 +12,7 @@ function fileMeta(over: Partial<FileMeta> = {}): FileMeta {
     via: null,
     outOfTree: false,
     global: false,
+    ancestor: false,
     mtimeMs: 1000,
     git: { inRepo: false, lastCommit: null, dirty: false },
     ...over,
@@ -77,7 +78,22 @@ test("buildBanner annotates imported + out-of-tree provenance", () => {
   expect(msg).toContain("out-of-tree");
 });
 
-test("buildBanner summarizes @imports beyond depth 2", () => {
+// An ancestor's file is outside the tree by nature, like a global one: "(out-of-tree)"
+// would read as an import that escaped.
+test("buildBanner labels an ancestor root (ancestor), not (out-of-tree)", () => {
+  const f = "/repo/CLAUDE.md";
+  const msg = buildBanner({
+    projectDir: "/repo/sub",
+    classification: { approved: [], added: [f], changed: [] },
+    meta: { [f]: fileMeta({ outOfTree: true, ancestor: true }) },
+    deep: [],
+    now: 2000,
+  });
+  expect(msg).toContain("✦ /repo/CLAUDE.md (ancestor)  [NEW — unaffirmed]");
+  expect(msg).not.toContain("out-of-tree");
+});
+
+test("buildBanner summarizes @imports beyond depth 4", () => {
   const f = "/proj/CLAUDE.md";
   const msg = buildBanner({
     projectDir: "/proj",
@@ -86,7 +102,7 @@ test("buildBanner summarizes @imports beyond depth 2", () => {
     deep: [{ via: "/proj/b.md", raw: "c.md" }],
     now: 1000,
   });
-  expect(msg).toContain("beyond depth 2");
+  expect(msg).toContain("beyond depth 4");
   expect(msg).toContain("b.md → c.md");
 });
 
@@ -127,6 +143,27 @@ test("emits the banner on both channels: call to action for the terminal, fact p
   expect(model).toContain("do not run /affirm -a");
   expect(model).not.toContain("Review unaffirmed files");
   expect(JSON.stringify(json)).not.toContain("Always deploy");
+});
+
+// symbion 529423-9b9: Claude Code loads CLAUDE.local.md beside CLAUDE.md, and it is
+// gitignored by design, so affirm is the only thing that can see it change.
+test("hook reports a project whose only instruction file is CLAUDE.local.md", () => {
+  const home = mkDir("affirm-home-local-");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const dir = mkDir("affirm-proj-local-");
+  writeFileSync(join(dir, "CLAUDE.local.md"), "mine");
+  const res = runHook({ CLAUDE_PROJECT_DIR: dir }, home);
+  expect(JSON.parse(res.stdout).systemMessage).toContain("✦ CLAUDE.local.md  [NEW — unaffirmed]");
+});
+
+test("hook reports a parent's CLAUDE.md on a subdirectory launch", () => {
+  const home = mkDir("affirm-home-anc-");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const dir = mkDir("affirm-proj-anc-");
+  writeFileSync(join(dir, "CLAUDE.md"), "parent");
+  mkdirSync(join(dir, "sub"));
+  const res = runHook({ CLAUDE_PROJECT_DIR: join(dir, "sub") }, home);
+  expect(JSON.parse(res.stdout).systemMessage).toContain(`✦ ${join(dir, "CLAUDE.md")} (ancestor)  [NEW — unaffirmed]`);
 });
 
 test("emits {} when no instruction files exist", () => {

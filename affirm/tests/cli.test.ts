@@ -53,7 +53,7 @@ test("no instruction files: prints message and exits 0", () => {
   const io = collect();
   const code = runCli([], opts(dir, hashPath, io));
   expect(code).toBe(0);
-  expect(io.out.join("\n")).toContain("No CLAUDE.md or .claude/rules/ files found");
+  expect(io.out.join("\n")).toContain(`No instruction files load in ${dir}`);
 });
 
 test("bare invocation shows details, records nothing", () => {
@@ -113,17 +113,32 @@ test("bare invocation flags out-of-tree imports", () => {
   expect(io.out.join("\n")).toMatch(/scope:\s+out-of-tree/);
 });
 
-test("bare invocation summarizes @imports beyond depth 2", () => {
+test("bare invocation summarizes @imports beyond depth 4", () => {
   const { dir, hashPath } = mkProject();
   writeFileSync(join(dir, "CLAUDE.md"), "@a.md");
-  writeFileSync(join(dir, "a.md"), "@b.md");
-  writeFileSync(join(dir, "b.md"), "@c.md");
-  writeFileSync(join(dir, "c.md"), "deep");
+  for (const [f, next] of [["a", "b"], ["b", "c"], ["c", "d"], ["d", "e"]]) {
+    writeFileSync(join(dir, `${f}.md`), `@${next}.md`);
+  }
+  writeFileSync(join(dir, "e.md"), "deep");
   const io = collect();
   runCli([], opts(dir, hashPath, io));
   const out = io.out.join("\n");
-  expect(out).toContain("beyond depth 2");
-  expect(out).toMatch(/b\.md → c\.md/);
+  expect(out).toContain("beyond depth 4");
+  expect(out).toMatch(/d\.md → e\.md/);
+});
+
+// A session launched in a subdirectory loads the parent's CLAUDE.md; affirm used to
+// say "No CLAUDE.md ... found" there (1 such session measured, 2026-09-26).
+test("bare invocation lists an ancestor's CLAUDE.md as scope: ancestor", () => {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "parent rules");
+  mkdirSync(join(dir, "sub"));
+  const io = collect();
+  runCli([], opts(join(dir, "sub"), hashPath, io));
+  const out = io.out.join("\n");
+  expect(out).toContain(join(dir, "CLAUDE.md"));
+  expect(out).toMatch(/scope:\s+ancestor/);
+  expect(out).not.toMatch(/scope:\s+out-of-tree/);
 });
 
 test("--show is no longer recognized", () => {
@@ -193,6 +208,16 @@ test("--since says nothing to do when the window opened after the last edit", ()
   const out = io.out.join("\n");
   expect(out).toContain("0 of 1 instruction file touched");
   expect(out).not.toContain("run /affirm");
+});
+
+// A file edited outside the scope reads "0 of N" too. Naming the N makes that miss
+// visible (tooling journal 2026-09-24: `.claude/CLAUDE.md` edited, "0 of 1" printed).
+test("--since names the files it tracked when none was touched", () => {
+  const { dir, hashPath } = projectWithClaudeMd("# rules\n");
+  writeFileSync(join(dir, "CLAUDE.local.md"), "mine\n");
+  const io = collect();
+  runCli(["--since", "2999-01-01T00:00:00Z"], opts(dir, hashPath, io));
+  expect(io.out).toEqual(["0 of 2 instruction files touched since 2999-01-01T00:00:00Z: CLAUDE.local.md, CLAUDE.md"]);
 });
 
 // Touched but unchanged: prompting here is exactly the alert fatigue the gate exists
