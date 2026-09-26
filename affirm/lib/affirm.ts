@@ -75,17 +75,22 @@ export function classify(files: string[], stored: Record<string, string>): Class
   return { approved, added, changed, unreadable };
 }
 
+/** What a file's hash was before `-a` recorded it. */
+export type Prior = "new" | "changed" | "unchanged";
+
 /**
  * Per file, like `classify`: one unreadable file used to throw before the store was
  * written, so every readable file beside it went unaffirmed too (symbion b6e).
+ * `prior` is read before the overwrite, because the attestation is the one moment
+ * that knows which hashes it actually moved.
  */
 export function approveAll(
   projectDir: string,
   hashPath: string = HASH_FILE,
-): { approved: Array<{ path: string; hash: string }>; unreadable: string[] } {
+): { approved: Array<{ path: string; hash: string; prior: Prior }>; unreadable: string[] } {
   const files = collectInstructionFiles(projectDir);
   const stored = loadHashes(hashPath);
-  const approved: Array<{ path: string; hash: string }> = [];
+  const approved: Array<{ path: string; hash: string; prior: Prior }> = [];
   const unreadable: string[] = [];
   for (const f of files) {
     let h: string;
@@ -95,8 +100,9 @@ export function approveAll(
       unreadable.push(f);
       continue;
     }
+    const prior: Prior = stored[f] === undefined ? "new" : stored[f] === h ? "unchanged" : "changed";
     stored[f] = h;
-    approved.push({ path: f, hash: h });
+    approved.push({ path: f, hash: h, prior });
   }
   saveHashes(stored, hashPath);
   return { approved, unreadable };

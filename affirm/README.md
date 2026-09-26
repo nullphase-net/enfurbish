@@ -42,11 +42,21 @@ Affirm: instruction files in scope:
 
 ### `/affirm`
 
-Read-only. Shows each instruction file in the current cwd with its affirmation status, modification time, and git info (last commit author + date, and whether there are uncommitted local changes). `@import`ed files are listed too, annotated with the file that pulled them in, their depth, and a `scope:` line — `global`, `ancestor`, or `out-of-tree` — when they live outside the project.
+Read-only. A head line with the count and what needs attention, then one line per file with the banner's markers. An affirmed file is a single line, annotated with the file that `@import`ed it and its scope (`global`, `ancestor`, `out-of-tree`) where those apply. A new, changed or unreadable file expands to its status, modification time and git info (last commit author + date, and whether there are uncommitted local changes), and the `/affirm -a` hint appears only when something is new or changed:
+
+```
+2 instruction files in /path/to/project · 1 changed
+  ✧ CLAUDE.md
+    status:   CHANGED (hash mismatch)
+    modified: 2026-09-26T19:25:58Z
+    git:      untracked
+  ✓ ~/.claude/CLAUDE.md (global)
+Run /affirm -a to record current hashes.
+```
 
 ### `/affirm -a` (or `--apply`)
 
-Records SHA-256 hashes for everything in scope — the current cwd's files and the global ones — to `~/.claude/affirm-hashes.json`. Invoking `-a` is itself the attestation; there's no separate "are you sure?" prompt. Because the store is keyed by absolute path, affirming the global file once covers every project.
+Records SHA-256 hashes for everything in scope — the current cwd's files and the global ones — to `~/.claude/affirm-hashes.json`, and says what each hash was before: `new`, `changed`, or `unchanged`, so the output confirms that only the files you reviewed actually moved. Invoking `-a` is itself the attestation; there's no separate "are you sure?" prompt. Because the store is keyed by absolute path, affirming the global file once covers every project.
 
 ### Un-affirming
 

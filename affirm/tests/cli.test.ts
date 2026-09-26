@@ -63,8 +63,8 @@ test("bare invocation shows details, records nothing", () => {
   const code = runCli([], opts(dir, hashPath, io));
   expect(code).toBe(0);
   const out = io.out.join("\n");
-  expect(out).toContain("Instruction files in");
-  expect(out).toContain("CLAUDE.md");
+  expect(out).toContain(`1 instruction file in ${dir} · 1 new`);
+  expect(out).toContain("✦ CLAUDE.md");
   expect(out).toMatch(/status:\s+NEW \(not yet affirmed\)/);
   expect(out).toMatch(/modified:\s+\d{4}-\d{2}-\d{2}T/);
   expect(out).toContain("/affirm -a");  // hint footer
@@ -72,13 +72,41 @@ test("bare invocation shows details, records nothing", () => {
   expect(loadHashes(hashPath)).toEqual({});
 });
 
-test("bare invocation shows affirmed status for matching hash", () => {
+// An affirmed file is one line; the block of status/modified/git lines is for the
+// files that need a decision, and so is the call to action.
+test("bare invocation collapses affirmed files to one line and drops the footer", () => {
   const { dir, hashPath } = mkProject();
-  writeFileSync(join(dir, "CLAUDE.md"), "rules");
-  saveHashes({ [join(dir, "CLAUDE.md")]: sha256OfFile(join(dir, "CLAUDE.md")) }, hashPath);
+  writeFileSync(join(dir, "CLAUDE.md"), "rules, see @extra.md");
+  writeFileSync(join(dir, "extra.md"), "more");
+  saveHashes({
+    [join(dir, "CLAUDE.md")]: sha256OfFile(join(dir, "CLAUDE.md")),
+    [join(dir, "extra.md")]: sha256OfFile(join(dir, "extra.md")),
+  }, hashPath);
   const io = collect();
   runCli([], opts(dir, hashPath, io));
-  expect(io.out.join("\n")).toMatch(/status:\s+affirmed/);
+  expect(io.out).toEqual([
+    `2 instruction files in ${dir} · all affirmed`,
+    "  ✓ CLAUDE.md",
+    "  ✓ extra.md ← @from CLAUDE.md (depth 1)",
+  ]);
+});
+
+test("bare invocation expands only the file that changed", () => {
+  const { dir, hashPath } = mkProject();
+  writeFileSync(join(dir, "CLAUDE.md"), "v1");
+  writeFileSync(join(dir, "CLAUDE.local.md"), "mine");
+  saveHashes({
+    [join(dir, "CLAUDE.md")]: sha256OfFile(join(dir, "CLAUDE.md")),
+    [join(dir, "CLAUDE.local.md")]: "stale",
+  }, hashPath);
+  const io = collect();
+  runCli([], opts(dir, hashPath, io));
+  expect(io.out[0]).toBe(`2 instruction files in ${dir} · 1 changed`);
+  expect(io.out).toContain("  ✓ CLAUDE.md");
+  const at = io.out.indexOf("  ✧ CLAUDE.local.md");
+  expect(at).toBeGreaterThan(0);
+  expect(io.out[at + 1]).toMatch(/^\s+status:\s+CHANGED \(hash mismatch\)$/);
+  expect(io.out.at(-1)).toBe("Run /affirm -a to record current hashes.");
 });
 
 test("bare invocation flags CHANGED after file mutation", () => {
@@ -168,6 +196,27 @@ test("-a records hashes (same behavior as bare invocation today)", () => {
   expect(code).toBe(0);
   expect(io.out.join("\n")).toContain("Affirmed 1 file");
   expect(loadHashes(hashPath)[join(dir, "CLAUDE.md")]).toBe(sha256OfFile(join(dir, "CLAUDE.md")));
+});
+
+// 2026-09-26: the banner flagged one file CHANGED and -a listed both files the same
+// way, so its output could not confirm the other had not changed too.
+test("-a says which hashes it moved", () => {
+  const { dir, hashPath } = mkProject();
+  const at = (f: string) => join(dir, f);
+  writeFileSync(at("CLAUDE.md"), "v1");
+  writeFileSync(at("CLAUDE.local.md"), "mine");
+  saveHashes({ [at("CLAUDE.md")]: sha256OfFile(at("CLAUDE.md")), [at("CLAUDE.local.md")]: "stale" }, hashPath);
+  mkdirSync(join(dir, ".claude", "rules"), { recursive: true });
+  writeFileSync(at(".claude/rules/new.md"), "new");
+  const io = collect();
+  runCli(["-a"], opts(dir, hashPath, io));
+  const h = (f: string) => sha256OfFile(at(f)).slice(0, 12);
+  expect(io.out).toEqual([
+    `Affirmed 3 files in ${dir} · 1 new, 1 changed, 1 unchanged`,
+    `  ✦ .claude/rules/new.md  (${h(".claude/rules/new.md")}…)  new`,
+    `  ✧ CLAUDE.local.md  (${h("CLAUDE.local.md")}…)  changed`,
+    `  ✓ CLAUDE.md  (${h("CLAUDE.md")}…)  unchanged`,
+  ]);
 });
 
 test("--apply records hashes (long form of -a)", () => {

@@ -40,33 +40,57 @@ function fmtGit(info: GitInfo): string | null {
   return info.dirty ? `${base} (uncommitted local changes)` : base;
 }
 
+/** `1 new, 2 changed` — the nonzero states in `order`, or `none` when all are zero. */
+function tally(states: string[], order: string[], none: string): string {
+  const parts = order.flatMap((s) => {
+    const n = states.filter((x) => x === s).length;
+    return n ? [`${n} ${s}`] : [];
+  });
+  return parts.length ? parts.join(", ") : none;
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+const MARK: Record<string, string> = {
+  affirmed: "✓", unchanged: "✓", new: "✦", changed: "✧", unreadable: "?",
+};
+
+/**
+ * One line per affirmed file; the status/modified/git block only for a file that
+ * needs a decision, and the call to action only when one does. The same markers as
+ * the banner. Every file used to get four lines and a blank whatever its state.
+ */
 function renderDetails(
   projectDir: string,
   graph: InstructionGraph,
   stored: Record<string, string>,
   out: (s: string) => void,
 ) {
-  out(`Instruction files in ${projectDir}:`);
-  out("");
-  for (const gf of graph.files) {
-    out(`  ${displayPath(projectDir, gf.path)}`);
-    out(`    status:   ${statusOf(gf.path, stored)}`);
+  const rows = graph.files.map((gf) => ({ gf, status: statusOf(gf.path, stored) }));
+  const states = rows.map((r) => r.status.split(" ")[0]!.toLowerCase());
+  out(`${plural(rows.length, "instruction file")} in ${projectDir} · ${tally(states, ["new", "changed", "unreadable"], "all affirmed")}`);
+  for (const [i, { gf, status }] of rows.entries()) {
+    const via = gf.via ? ` ← @from ${displayPath(projectDir, gf.via)} (depth ${gf.depth})` : "";
+    const scope = gf.global ? "global" : gf.ancestor ? "ancestor" : gf.outOfTree ? "out-of-tree" : "";
+    const name = `  ${MARK[states[i]!]} ${displayPath(projectDir, gf.path)}`;
+    if (status === "affirmed") {
+      out(`${name}${via}${scope && ` (${scope})`}`);
+      continue;
+    }
+    out(name);
+    out(`    status:   ${status}`);
     const mt = getMtime(gf.path);
     if (mt !== null) out(`    modified: ${fmtTs(mt)}`);
     const git = fmtGit(getGitInfo(dirname(gf.path), gf.path)); // cwd = file's dir → correct repo, incl. out-of-tree
     if (git !== null) out(`    git:      ${git}`);
     if (gf.via) out(`    import:   from ${displayPath(projectDir, gf.via)} (depth ${gf.depth})`);
-    if (gf.global) out(`    scope:    global`);
-    else if (gf.ancestor) out(`    scope:    ancestor`);
-    else if (gf.outOfTree) out(`    scope:    out-of-tree`);
-    out("");
+    if (scope) out(`    scope:    ${scope}`);
   }
   if (graph.deep.length > 0) {
     const list = graph.deep.map((d) => `${displayPath(projectDir, d.via)} → ${d.raw}`).join(", ");
     out(`@imports beyond depth ${MAX_IMPORT_DEPTH} (not tracked): ${list}`);
-    out("");
   }
-  out("Run /affirm -a to record current hashes.");
+  if (states.some((s) => s === "new" || s === "changed")) out("Run /affirm -a to record current hashes.");
 }
 
 /**
@@ -169,9 +193,10 @@ export function runCli(argv: string[], opts: CliOpts): number {
 
   if (arg === "-a" || arg === "--apply") {
     const { approved, unreadable } = approveAll(projectDir, hashPath);
-    opts.out(`Affirmed ${approved.length} file${approved.length === 1 ? "" : "s"} in ${projectDir}:`);
-    for (const { path, hash } of approved) {
-      opts.out(`  ${displayPath(projectDir, path)}  (${hash.slice(0, 12)}…)`);
+    const priors = approved.map((a) => a.prior);
+    opts.out(`Affirmed ${plural(approved.length, "file")} in ${projectDir} · ${tally(priors, ["new", "changed", "unchanged"], "none")}`);
+    for (const { path, hash, prior } of approved) {
+      opts.out(`  ${MARK[prior]} ${displayPath(projectDir, path)}  (${hash.slice(0, 12)}…)  ${prior}`);
     }
     for (const path of unreadable) {
       opts.out(`  ${displayPath(projectDir, path)}  (unreadable — not affirmed)`);

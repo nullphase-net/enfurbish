@@ -170,6 +170,22 @@ test("approveAll records hashes for every instruction file", () => {
   expect(stored[join(dir, "CLAUDE.md")]).toBe(approved[0]!.hash);
 });
 
+test("approveAll says what each file was before it was affirmed", () => {
+  const { dir, hashPath } = mkProject();
+  const at = (f: string) => join(dir, f);
+  writeFileSync(at("CLAUDE.md"), "v1");
+  writeFileSync(at("CLAUDE.local.md"), "mine");
+  saveHashes({ [at("CLAUDE.md")]: sha256OfFile(at("CLAUDE.md")), [at("CLAUDE.local.md")]: "stale" }, hashPath);
+  mkdirSync(join(dir, ".claude", "rules"), { recursive: true });
+  writeFileSync(at(".claude/rules/new.md"), "new");
+  const prior = Object.fromEntries(approveAll(dir, hashPath).approved.map((a) => [a.path, a.prior]));
+  expect(prior).toEqual({
+    [at("CLAUDE.md")]: "unchanged",
+    [at("CLAUDE.local.md")]: "changed",
+    [at(".claude/rules/new.md")]: "new",
+  });
+});
+
 test("approveAll preserves entries for other projects", () => {
   const { dir, hashPath } = mkProject();
   saveHashes({ "/other/proj/CLAUDE.md": "deadbeef" }, hashPath);
