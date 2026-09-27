@@ -1,11 +1,11 @@
 ---
 name: next
-description: Read the project's newest NEXT_SESSION.md and brief the user on what's pending. Invoke as /next when the user wants to pick up where the last session left off.
+description: Use when the user wants to pick up where the last session left off, or asks what earlier sessions did, found or decided. Reads the newest NEXT_SESSION.md handoff and the dated retros /wrap leaves in ~/.claude/sessions/. Invoke as /next.
 ---
 
 # `/next` — read the handoff
 
-Use when the user wants to pick up where the last session left off, or to re-consult the handoff mid-session.
+Use when the user wants to pick up where the last session left off, or to re-consult the handoff mid-session. When they ask what earlier sessions did or decided instead, go to "Past sessions" below.
 
 ## Procedure
 
@@ -38,10 +38,21 @@ Use when the user wants to pick up where the last session left off, or to re-con
    - Invoked bare, don't start work yet. Wait for them to choose.
    - Invoked with arguments (`/next finish the ledger merge`), they have chosen. Brief in one line — which file, how stale — then start on what they named. Asking again costs a round trip for an answer already given.
 
+## Past sessions
+
+For history rather than what is pending ("what did we do last week", "why did we drop X"), read this project's retros. `~/.claude/sessions/` holds every project's, so list them rather than grep it:
+
+```bash
+bun run "<skill-base-dir>/../../lib/handoffs.ts" --retros              # newest 10, each with its opening paragraph
+bun run "<skill-base-dir>/../../lib/handoffs.ts" --retros '<regex>'    # the newest 10 that match, with the first matching line
+```
+
+Read the retros that answer the question. A retro describes the repo as that session left it; check a claim against git before relaying it as current.
+
 ## What this skill does NOT do
 
 - Write or modify any file. `/next` is read-only by design.
-- Touch the tooling journal or retro files.
+- Touch the tooling journal. Retros it reads, never writes.
 
 ## Edge cases
 

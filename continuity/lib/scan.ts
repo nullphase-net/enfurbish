@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import { join, basename, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
+import { humanizeDelta } from "./humanize";
 
 export function encodeCwd(cwd: string): string {
   return cwd.replaceAll("/", "-");
@@ -131,6 +132,11 @@ export type ScanOk = {
   files_changed?: string[];
   /** How many `files_changed` entries the cap dropped. Absent when it dropped none. */
   files_changed_hidden?: number;
+  /**
+   * What the repo holds that no commit does, repo-wide and not time-bounded. See
+   * `worktreeState`. Absent when `cwd` is not in a repo.
+   */
+  worktree?: Worktree;
   files_read_count: number;
   degraded?: boolean;
   reason?: string;
@@ -220,6 +226,68 @@ export function gitChangedSince(cwd: string, iso: string): string[] | null {
   // other directory belongs to another cwd's wrap and stays.
   seen.delete(`${loc.prefix}NEXT_SESSION.md`);
   return [...seen].sort();
+}
+
+export type Worktree = {
+  /** One line for the wrap's final report, e.g. `3 uncommitted, 2 from before this session (oldest 9d 3h) · 12 unpushed`. */
+  summary: string;
+  /**
+   * Uncommitted paths whose mtime predates `session_start`: work that has already
+   * outlived a session. Null when that could not be told (status failed, no start).
+   */
+  before_session: number | null;
+};
+
+/**
+ * The uncommitted and unpushed work in the repo holding `cwd`, not bounded by time.
+ *
+ * `files_changed` keeps a dirty path only when its mtime falls inside the session,
+ * which is right for "what did this session move" and exactly wrong for "what has
+ * been sitting here". `handoffs.ts --since` filters the same way against the
+ * handoff's header. So work left uncommitted across sessions reached no surface at
+ * all, and a user reported sessions piling it up. Measured 2026-09-26 over the 25
+ * local repos holding a handoff: 15 had uncommitted paths, 8 had some older than
+ * their own handoff, the oldest 191 days; one branch sat 1007 commits ahead of its
+ * upstream.
+ *
+ * NEXT_SESSION.md is not counted, in any directory: it is this plugin's artifact,
+ * and a project that tracks it without committing each wrap would read "1 from before
+ * this session" forever. A failed status is `unknown`, never `clean`.
+ */
+export function worktreeState(cwd: string, iso: string, now = Date.now()): Worktree | undefined {
+  const loc = cwd ? repoLocation(cwd) : null;
+  if (!loc) return undefined;
+  const st = spawnSync("git", ["-C", cwd, "status", "--porcelain", "-b", "-z"], { encoding: "utf8", maxBuffer: 8 << 20 });
+  if (st.status !== 0) return { summary: "unknown (git status failed)", before_session: null };
+
+  const recs = st.stdout.split("\0").filter(Boolean);
+  const branch = recs[0]?.startsWith("## ") ? recs.shift()!.slice(3) : "";
+  const start = Date.parse(iso);
+  let count = 0, before = 0, oldest = Infinity;
+  for (const rec of recs) {
+    // A rename's source arrives as a bare second field with no status bytes; the
+    // rename is already counted once by its `R  <dest>` record.
+    if (!/^[ MADRCU?!]{2} /.test(rec)) continue;
+    const rel = rec.slice(3);
+    if (basename(rel.replace(/\/$/, "")) === "NEXT_SESSION.md") continue;
+    count++;
+    let m: number;
+    try { m = statSync(join(loc.top, rel)).mtimeMs; } catch { continue; } // a deletion has no mtime
+    if (m < start) before++;
+    oldest = Math.min(oldest, m);
+  }
+
+  const known = start > 0;
+  const pile = known && before
+    ? `, ${before} from before this session (oldest ${humanizeDelta(now - oldest)})`
+    : "";
+  const parts = [count ? `${count} uncommitted${pile}` : "clean"];
+  // `main...origin/main [ahead 3, behind 1]`; no `...` means no upstream, and `[gone]`
+  // means the upstream was deleted. Either way nothing here is pushed anywhere.
+  const ahead = Number(/\[ahead (\d+)/.exec(branch)?.[1] ?? 0);
+  if (!branch.includes("...") || branch.includes("[gone]")) parts.push("no upstream");
+  else if (ahead) parts.push(`${ahead} unpushed`);
+  return { summary: parts.join(" · "), before_session: known ? before : null };
 }
 
 /** The repo root holding `cwd`, and `cwd`'s path under it (`sub/`, or `` at the root). */
@@ -424,6 +492,8 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
   const blind = bash && (files_edited.length === 0
     || (top !== undefined && editsMiss(gitChanged!, [...editsByFile.keys()], top)));
 
+  const worktree = worktreeState(cwd, firstTs!);
+
   return {
     ok: true,
     session_id,
@@ -447,6 +517,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
       ? { files_changed_hidden: gitChanged.length - FILES_CHANGED_CAP }
       : {}),
     files_read_count: filesRead.size,
+    ...(worktree ? { worktree } : {}),
     ...(degraded ? { degraded: true, reason } : {}),
   };
 }

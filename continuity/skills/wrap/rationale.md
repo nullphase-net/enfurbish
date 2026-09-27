@@ -37,6 +37,8 @@ The evidence behind the rules in `SKILL.md` and `full.md`, grouped by step. Noth
 - **State a condition's status.** An item worded "do X if Y" was written when Y's status was known and read when it was not; an unattended session obeyed the stale condition (journal #8cb6b4, 2026-09-04).
 - **A delegated open list.** Measured 2026-09-21 with dry-run agents on a handoff that named its store: five of five runs of the previous skill text already honoured the file's own section, so the paragraph is the contract written down, not a behaviour change. The line that changed behaviour is in `/next`, for the case with no file at all.
 
+- **Uncommitted work outlives sessions unseen.** `files_changed` keeps a dirty path only when its mtime falls inside the session, and `--since` filters the same way against the handoff header, so work left uncommitted across sessions reached no surface, and a user reported sessions piling it up. Measured 2026-09-26 over 25 local repos holding a handoff: 15 had uncommitted paths, 8 had some older than their own handoff (the oldest 191 days), and one branch sat 1007 commits ahead of its upstream. `worktree` is not time-bounded; `before_session` is the pile. The wrap reports it and does not commit: which paths belong in which commit is a judgment, and sessions end with nobody at the keyboard to make it.
+
 ## Step 6: affirm
 
 - **At wrap time, not session start.** A CHANGED warning at the next session start about a file the user edited themselves is pure alert fatigue; by construction they already know. Across eight wraps the mtime window separated 6 positives from 2 negatives cleanly. It reports rather than asks because two of those eight sessions ended with nobody at the keyboard to answer a prompt.
@@ -45,3 +47,4 @@ The evidence behind the rules in `SKILL.md` and `full.md`, grouped by step. Noth
 ## `-q`
 
 - A short arc, a mid-day handoff, or a session whose tooling story is identical to the last one journaled has a clean pointer as its whole value. The two writes outside the repo were pure cost there, and the mode exists so the pointer still gets reconciled instead of skipped along with them.
+- **The `Handoff:` line.** 5.7's carried/resolved/added note lives in the retro, and `-q` writes none. 11 of 11 `-q` dry runs on 2026-09-26 put it on a `Handoff:` line the template had no slot for, each in its own shape; the slot is that behaviour written down.

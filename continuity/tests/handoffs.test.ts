@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHECK_RESULTS, checkReport, collect, commitsSince, formatHeader, generation, main, ownership, ownershipSince, report, scanForNextSessionsWithStats, stamp, windowSince } from "../lib/handoffs";
+import { CHECK_RESULTS, checkReport, collect, commitsSince, formatHeader, generation, listRetros, main, ownership, ownershipSince, report, retroReport, scanForNextSessionsWithStats, stamp, windowSince } from "../lib/handoffs";
 import { spawnSync } from "node:child_process";
 import { gitInitClean } from "./helpers/git";
 
@@ -663,4 +663,95 @@ test("--check emits the guidance beneath the verdict as one message", () => {
   const out: string[] = [];
   expect(main(["--check", path, START], Date.now(), s => void out.push(s))).toBe(0);
   expect(out).toEqual([checkReport("edited:prior")]);
+});
+
+// --- retros ----------------------------------------------------------------
+
+const retro = (cwd: string, what: string, extra = "") =>
+  `# Session retro — 2026-09-01 — x — 00000000\n\n**Cwd:** ${cwd}\n**Duration:** 5m\n\n## What happened\n${what}\n\n## Learnings\n${extra}\n`;
+
+function retroDir(root: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "retros-"));
+  const put = (name: string, body: string, iso: string) => {
+    writeFileSync(join(dir, name), body);
+    utimesSync(join(dir, name), new Date(iso), new Date(iso));
+  };
+  put("2026-09-01-proj-aaaaaaaa.md", retro(root, "Oldest at the root."), "2026-09-01T12:00:00Z");
+  put("2026-09-03-sub-bbbbbbbb.md", retro(join(root, "sub"), "From a subdirectory,\nwrapped across two lines.", "dropped the streaming parser: too slow"), "2026-09-03T12:00:00Z");
+  put("2026-09-02-proj2-cccccccc.md", retro(`${root}2`, "A sibling whose name extends ours."), "2026-09-02T12:00:00Z");
+  put("2026-09-04-other-dddddddd.md", retro("/elsewhere/other", "Another project."), "2026-09-04T12:00:00Z");
+  put("2026-09-05-x-eeeeeeee.md", "# no cwd line at all\n", "2026-09-05T12:00:00Z");
+  put("12345.json", `{"cwd":"${root}"}`, "2026-09-06T12:00:00Z");
+  return dir;
+}
+
+test("listRetros matches on the Cwd line: root and below, not a name that extends it", () => {
+  const root = "/p/proj";
+  const got = listRetros(root, retroDir(root))!;
+  expect(got.map(r => r.cwd)).toEqual(["/p/proj/sub", "/p/proj"]); // newest first
+});
+
+test("listRetros: no directory is zero retros; an unreadable one is unknown", () => {
+  expect(listRetros("/p/proj", join(tmpdir(), "no-such-retro-dir-xyz"))).toEqual([]);
+  const file = join(mkdtempSync(join(tmpdir(), "retros-")), "not-a-dir");
+  writeFileSync(file, "");
+  expect(listRetros("/p/proj", file)).toBe(null);
+  expect(retroReport(null, "/p/proj", file, 0)).toBe(`retros unknown · ${file} unreadable`);
+});
+
+test("retroReport lists newest first with each retro's first paragraph, and says what it hid", () => {
+  const root = "/p/proj";
+  const dir = retroDir(root);
+  const out = retroReport(listRetros(root, dir), root, dir, Date.parse("2026-09-04T12:00:00Z"), undefined, 1);
+  expect(out).toBe([
+    "2 retros · root /p/proj · +1 older, not shown",
+    `  1d ago  ${join(dir, "2026-09-03-sub-bbbbbbbb.md")}  [sub]`,
+    "    From a subdirectory, wrapped across two lines.",
+  ].join("\n"));
+});
+
+test("retroReport with a pattern shows every matching retro and the lines that matched", () => {
+  const root = "/p/proj";
+  const dir = retroDir(root);
+  const out = retroReport(listRetros(root, dir), root, dir, Date.parse("2026-09-04T12:00:00Z"), "stream(ing)? parser");
+  expect(out).toBe([
+    "1 of 2 retros match /stream(ing)? parser/i · root /p/proj",
+    `  1d ago  ${join(dir, "2026-09-03-sub-bbbbbbbb.md")}  [sub]`,
+    "    L11: dropped the streaming parser: too slow",
+  ].join("\n"));
+  // Capped like the listing, and the head says what the cap hid.
+  const capped = retroReport(listRetros(root, dir), root, dir, 0, "retro|subdirectory", 1);
+  expect(capped.split("\n")[0]).toBe("2 of 2 retros match /retro|subdirectory/i · root /p/proj · +1 older matches, not shown");
+  expect(capped.split("\n")[2]).toMatch(/^    L1: .*\(\+1 more\)$/);
+  // A pattern that is not a valid regex is searched as text, not thrown.
+  expect(retroReport(listRetros(root, dir), root, dir, 0, "parser: (")).toStartWith("0 of 2 retros match");
+});
+
+test("listRetros matches a Cwd written through a symlink to the root", () => {
+  const real = mkdtempSync(join(tmpdir(), "real-"));
+  const link = join(mkdtempSync(join(tmpdir(), "link-")), "proj");
+  symlinkSync(real, link);
+  const dir = mkdtempSync(join(tmpdir(), "retros-"));
+  writeFileSync(join(dir, "2026-09-01-proj-aaaaaaaa.md"), retro(link, "Launched through a link."));
+  expect(listRetros(realpathSync(real), dir)!.map(r => r.cwd)).toEqual([link]);
+  expect(listRetros(link, dir)!.length).toBe(1);
+  // The subdirectory marker is computed resolved too, or a linked root prints `[../..]`.
+  mkdirSync(join(real, "sub"));
+  writeFileSync(join(dir, "2026-09-02-sub-bbbbbbbb.md"), retro(join(link, "sub"), "Below the link."));
+  expect(listRetros(realpathSync(real), dir)!.map(r => r.rel).sort()).toEqual(["", "sub"]);
+});
+
+// The CLI reads ~/.claude/sessions, a default no unit test above exercises.
+test("--retros reads ~/.claude/sessions for the project holding the cwd", () => {
+  const home = mkdtempSync(join(tmpdir(), "home-"));
+  const proj = mkdtempSync(join(tmpdir(), "proj-"));
+  mkdirSync(join(proj, ".git"));
+  mkdirSync(join(home, ".claude", "sessions"), { recursive: true });
+  writeFileSync(join(home, ".claude", "sessions", "2026-09-01-proj-aaaaaaaa.md"), retro(proj, "Found by the CLI."));
+  const r = spawnSync("bun", ["run", join(import.meta.dir, "..", "lib", "handoffs.ts"), "--retros"], {
+    cwd: proj, env: { ...process.env, HOME: home }, encoding: "utf8",
+  });
+  expect(r.status).toBe(0);
+  expect(r.stdout).toContain(`1 retro · root ${realpathSync(proj)}`);
+  expect(r.stdout).toContain("Found by the CLI.");
 });

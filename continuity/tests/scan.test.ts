@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { FILES_CHANGED_CAP, encodeCwd, findTranscript, gitChangedSince, parseTranscript } from "../lib/scan";
+import { FILES_CHANGED_CAP, encodeCwd, findTranscript, gitChangedSince, parseTranscript, worktreeState } from "../lib/scan";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync, realpathSync, utimesSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -634,4 +634,120 @@ test("files_changed_hidden is absent when nothing was hidden", async () => {
   ]));
   expect(r.files_changed).toEqual(["one.txt"]);
   expect(r.files_changed_hidden).toBeUndefined();
+});
+
+// --- worktree: the uncommitted pile no time-bounded field can see ------------
+
+const START_ISO = "2026-08-18T19:00:00-05:00";
+const NOW = Date.parse("2026-08-28T19:00:00-05:00");
+const aged = (path: string, iso: string) => utimesSync(path, new Date(iso), new Date(iso));
+
+test("worktree: a clean repo with no upstream says both", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  expect(worktreeState(root, START_ISO, NOW)).toEqual({ summary: "clean · no upstream", before_session: 0 });
+});
+
+// Both directions of the pile: work from before the session is named with its age,
+// and work from inside it is counted without a pile clause.
+test("worktree: names uncommitted work older than the session, with its age", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, "left-over.txt"), "a prior session's");
+  aged(join(root, "left-over.txt"), "2026-08-15T19:00:00-05:00");
+  writeFileSync(join(root, "committed.txt"), "this session's");
+  aged(join(root, "committed.txt"), "2026-08-18T20:00:00-05:00");
+  expect(worktreeState(root, START_ISO, NOW)).toEqual({
+    summary: "2 uncommitted, 1 from before this session (oldest 13d) · no upstream",
+    before_session: 1,
+  });
+});
+
+test("worktree: work from inside the session carries no pile clause", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, "committed.txt"), "this session's");
+  aged(join(root, "committed.txt"), "2026-08-18T20:00:00-05:00");
+  expect(worktreeState(root, START_ISO, NOW)).toEqual({ summary: "1 uncommitted · no upstream", before_session: 0 });
+});
+
+test("worktree: NEXT_SESSION.md is not work, at the root or below it", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  mkdirSync(join(root, "sub"));
+  for (const p of [join(root, "NEXT_SESSION.md"), join(root, "sub", "NEXT_SESSION.md")]) {
+    writeFileSync(p, "# Next session");
+    aged(p, "2026-08-15T19:00:00-05:00");
+  }
+  // git collapses an untracked dir to `sub/`; add a sibling so the pointer is listed by name.
+  writeFileSync(join(root, "sub", "keep.txt"), "x");
+  spawnSync("git", ["add", "sub/keep.txt"], { cwd: root });
+  aged(join(root, "sub", "keep.txt"), "2026-08-18T20:00:00-05:00");
+  expect(worktreeState(root, START_ISO, NOW)!.summary).toBe("1 uncommitted · no upstream");
+});
+
+test("worktree: a rename counts once, and a deletion counts without an age", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  spawnSync("git", ["mv", "committed.txt", "moved.txt"], { cwd: root });
+  aged(join(root, "moved.txt"), "2026-08-18T20:00:00-05:00");
+  expect(worktreeState(root, START_ISO, NOW)!.summary).toBe("1 uncommitted · no upstream");
+  spawnSync("git", ["commit", "-q", "-m", "mv"], { cwd: root });
+  rmSync(join(root, "moved.txt"));
+  expect(worktreeState(root, START_ISO, NOW)).toEqual({ summary: "1 uncommitted · no upstream", before_session: 0 });
+});
+
+function withUpstream(): string {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  const bare = mkdtempSync(join(tmpdir(), "scan-bare-"));
+  const fx = gitInitClean(root);
+  try {
+    spawnSync("git", ["init", "-q", "--bare", bare]);
+    spawnSync("git", ["remote", "add", "origin", bare], { cwd: root });
+    spawnSync("git", ["push", "-q", "-u", "origin", "main"], { cwd: root });
+  } finally {
+    fx.cleanup();
+  }
+  return root;
+}
+
+test("worktree: commits ahead of the upstream are unpushed; in sync says nothing", () => {
+  const root = withUpstream();
+  expect(worktreeState(root, START_ISO, NOW)!.summary).toBe("clean");
+  for (const n of ["a", "b"]) {
+    writeFileSync(join(root, n), n);
+    spawnSync("git", ["add", n], { cwd: root });
+    spawnSync("git", ["commit", "-q", "-m", n], { cwd: root });
+  }
+  expect(worktreeState(root, START_ISO, NOW)!.summary).toBe("clean · 2 unpushed");
+});
+
+test("worktree: an upstream that was deleted is no upstream", () => {
+  const root = withUpstream();
+  spawnSync("git", ["update-ref", "-d", "refs/remotes/origin/main"], { cwd: root });
+  expect(worktreeState(root, START_ISO, NOW)!.summary).toBe("clean · no upstream");
+});
+
+test("worktree: a failed status is unknown, never clean; no repo is absent", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, ".git", "index"), "garbage");
+  expect(worktreeState(root, START_ISO, NOW)).toEqual({ summary: "unknown (git status failed)", before_session: null });
+  expect(worktreeState(mkdtempSync(join(tmpdir(), "scan-nogit-")), START_ISO, NOW)).toBeUndefined();
+  expect(worktreeState("", START_ISO, NOW)).toBeUndefined();
+});
+
+test("worktree: with no usable session start, the pile cannot be told apart", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, "left-over.txt"), "x");
+  aged(join(root, "left-over.txt"), "2026-08-15T19:00:00-05:00");
+  expect(worktreeState(root, "", NOW)).toEqual({ summary: "1 uncommitted · no upstream", before_session: null });
+});
+
+// Present whether or not Bash ran: the pile is a fact about the repo, not the session.
+test("parseTranscript carries worktree even for a session that ran no Bash", async () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, "left-over.txt"), "x");
+  aged(join(root, "left-over.txt"), "2026-08-15T19:00:00-05:00");
+  const rec = (extra: object) => JSON.stringify({
+    cwd: root, timestamp: "2026-08-18T18:30:00-05:00",
+    sessionId: "77777777-0000-0000-0000-000000000000", ...extra,
+  });
+  const r = await parseTranscript(writeSession([rec({ type: "user", message: { role: "user", content: "go" } })]));
+  expect(r.worktree?.before_session).toBe(1);
+  expect(r.worktree?.summary).toMatch(/^1 uncommitted, 1 from before this session \(oldest /);
 });

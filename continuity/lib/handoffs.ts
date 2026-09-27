@@ -16,9 +16,9 @@
  * only signal that survives whichever tool did the writing.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { getIgnoredDirs } from "./gitignore";
 import { humanizeDelta } from "./humanize";
@@ -486,6 +486,95 @@ export function windowSince(root: string, path: string, limit = 25): string {
   return out.join("\n");
 }
 
+// --- retros ----------------------------------------------------------------
+
+/** `rel` is the session cwd under the project root, resolved; `` at the root. */
+export interface Retro { path: string; mtimeMs: number; cwd: string; rel: string; text: string }
+
+const RETRO_CWD = /^\*\*Cwd:\*\* (.+)$/m;
+// The first paragraph: retro prose is hard-wrapped, so its first line can end mid-clause.
+const WHAT_HAPPENED = /^## What happened\n+((?:.+\n?)+)/m;
+
+/**
+ * The retros `/wrap` left for sessions at or under `root`, newest first.
+ *
+ * Matched on each retro's own `**Cwd:**` line, not its filename. The name's slug is
+ * basename(cwd), so a subdirectory session files under the subdirectory's name, and a
+ * slug glob also matches every project whose name ends the same way. Without this
+ * listing a session asked about earlier work searched every project's retros: five of
+ * five dry runs on 2026-09-26, once the skill descriptions said where retros live.
+ *
+ * Both sides are compared resolved. A retro's Cwd is whatever path the session was
+ * launched through, and `process.cwd()` is always the resolved one: on macOS every
+ * retro under /var/folders missed a root under /private/var until this compared them.
+ * A Cwd that no longer exists cannot be resolved and is compared as written.
+ *
+ * A missing directory is zero retros, not an error: nothing has wrapped yet. Any
+ * other read failure is null, which is not the same fact.
+ */
+export function listRetros(root: string, dir = join(homedir(), ".claude", "sessions")): Retro[] | null {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch (e: any) {
+    return e?.code === "ENOENT" ? [] : null;
+  }
+  const canon = (p: string) => { try { return realpathSync(p); } catch { return resolve(p); } };
+  const base = canon(root);
+  const out: Retro[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".md")) continue;
+    const path = join(dir, name);
+    try {
+      const text = readFileSync(path, "utf8");
+      const cwd = RETRO_CWD.exec(text)?.[1].trim();
+      if (!cwd) continue;
+      const rel = relative(base, canon(cwd));
+      if (isAbsolute(rel) || rel.split(sep)[0] === "..") continue;
+      out.push({ path, mtimeMs: statSync(path).mtimeMs, cwd, rel, text });
+    } catch { /* unreadable retro: skip it, the rest still answer */ }
+  }
+  return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * Without a pattern: the newest `limit` retros, each with the first paragraph under
+ * its `## What happened`, which answers "what did the last few sessions do" without a
+ * read per file. With one: the newest `limit` retros whose text matches it,
+ * case-insensitive, each with its first matching line, which answers "why did we drop
+ * X". Both are capped and the head counts what the cap hid: uncapped, `/the/` on a
+ * 41-retro project printed 17.8 KB, and a broad pattern is the easy one to type.
+ */
+export function retroReport(
+  rs: Retro[] | null, root: string, dir: string, now: number, pattern?: string, limit = 10,
+): string {
+  if (rs === null) return `retros unknown · ${dir} unreadable`;
+  let re: RegExp | undefined;
+  if (pattern) {
+    try { re = new RegExp(pattern, "i"); }
+    catch { re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"); }
+  }
+  const hits = re ? rs.filter(r => re!.test(r.text)) : rs;
+  const shown = hits.slice(0, limit);
+  const count = re ? `${hits.length} of ${rs.length} retros match /${pattern}/i` : `${rs.length} retro${rs.length === 1 ? "" : "s"}`;
+  const older = shown.length < hits.length ? ` · +${hits.length - shown.length} older${re ? " matches" : ""}, not shown` : "";
+  const lines = shown.flatMap(r => {
+    const where = r.rel ? `  [${r.rel}]` : "";
+    const head = `  ${humanizeDelta(now - r.mtimeMs)} ago  ${r.path}${where}`;
+    if (!re) {
+      const arc = WHAT_HAPPENED.exec(r.text)?.[1].replace(/\s+/g, " ").trim();
+      return arc ? [head, `    ${clip(arc, 160)}`] : [head];
+    }
+    const matched = r.text.split("\n").map((l, i) => [i + 1, l] as const).filter(([, l]) => re!.test(l));
+    const [n, l] = matched[0] ?? [0, ""]; // the match can span lines: the head still shows the file
+    const more = matched.length > 1 ? `  (+${matched.length - 1} more)` : "";
+    return n ? [head, `    L${n}: ${clip(l.trim(), 160)}${more}`] : [head];
+  });
+  return [`${count} · root ${root}${older}`, ...lines].join("\n");
+}
+
 const USAGE = `usage: handoffs.ts [--cwd <dir>]        list NEXT_SESSION.md files under the project root
        --stamp <path>              rewrite <path> with a current wrap-generation stamp;
                                    when the content moved, its header's timestamp too
@@ -495,7 +584,9 @@ const USAGE = `usage: handoffs.ts [--cwd <dir>]        list NEXT_SESSION.md file
                                    split :during | :prior
        --header <slug> <sid8> [retro]
                                    print the canonical header block, timestamped now
-       --since <path>              commits and files landed after <path>'s header`;
+       --since <path>              commits and files landed after <path>'s header
+       --retros [pattern]          this project's retros in ~/.claude/sessions, newest
+                                   first; with a pattern, the ones whose text matches`;
 
 export function main(
   args: string[],
@@ -542,6 +633,12 @@ export function main(
     const moved = LAST_WRAPPED.exec(next)?.[1];
     const header = moved && moved !== LAST_WRAPPED.exec(text)?.[1] ? ` · header ${moved}` : "";
     return emit(`stamped ${generation(next)} ${path}${header}`), 0;
+  }
+
+  if (flag === "--retros") {
+    const root = findProjectRoot(process.cwd());
+    const dir = join(homedir(), ".claude", "sessions");
+    return emit(retroReport(listRetros(root, dir), root, dir, now, args[1])), 0;
   }
 
   if (flag && flag !== "--cwd") return process.stderr.write(`${USAGE}\n`), 2;

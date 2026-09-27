@@ -1,6 +1,6 @@
 ---
 name: wrap
-description: Session-end retrospective. Produces a dated retro file, appends to a cross-session tooling journal, and reconciles NEXT_SESSION.md so the next session can resume cleanly. Invoke as /wrap when ending a session, or /wrap -q for the local repo work only (NEXT_SESSION.md + CLAUDE.md, no retro or journal).
+description: Session-end retrospective. Writes a dated retro to ~/.claude/sessions/, appends to a cross-session tooling journal, and reconciles NEXT_SESSION.md so the next session can resume cleanly. Invoke as /wrap when ending a session, or /wrap -q for the local repo work only (NEXT_SESSION.md + CLAUDE.md, no retro or journal).
 ---
 
 # `/wrap` — session-end retrospective
@@ -106,6 +106,7 @@ Four authoring rules:
 - Every measured fact names the artifact that produced it, inline: a result file, a commit sha, a `file.py:symbol`.
 - Verify any claim the item makes about the repo before writing it: counts, remaining budget, whether a proposed experiment is still feasible. A number this session measured an hour ago is not verified; re-run it now.
 - An item that waits on a condition ("do X once Y lands") says whether Y has already happened as of writing. An unattended session obeys the condition as written.
+- When the scan's `worktree.before_session` is above zero, uncommitted work has already outlived a session. Put `worktree.summary` under Don't forget, verbatim.
 
 **5.4 Write or remove.** Any items → write. Empty after the merge → `rm <cwd>/NEXT_SESSION.md` and note "removed (all resolved)" in the Handoff section.
 
@@ -152,13 +153,14 @@ Invoke the skill, not a path; affirm resolves its own lib. Files untouched insid
   NEXT_SESSION:   <written|preserved|removed|absent>
   CLAUDE.md:      <none|user-confirmed|project-confirmed>
   Affirm:         <clean|N changed, re-affirm|not installed>
+  Worktree:       <worktree.summary from the scan, verbatim|not a repo>
 $SUGGEST
 ```
 
-Under `-q` drop the Retro and Journal lines and head it `/wrap -q complete (local only):`. An empty `$SUGGEST` collapses; no trailing blank lines.
+Under `-q` drop the Retro and Journal lines, put the 5.7 note (carried, resolved, added) on a `Handoff:` line after `NEXT_SESSION:`, since there is no retro to hold it, and head it `/wrap -q complete (local only):`. An empty `$SUGGEST` collapses; no trailing blank lines.
 
 ## Policy
 
 - Only CLAUDE.md edits need explicit confirmation: user-authored, often committed, durable. The retro, the journal entry and `NEXT_SESSION.md` are written autonomously. Otherwise ask only on genuine ambiguity.
 - Best-effort. `scan.ts` failing → self-reported stats and "stats unavailable" in the journal entry. One failed write does not block the rest.
-- Out of scope: working-tree cleanup, git operations, `.gitignore` management for `NEXT_SESSION.md`, any memory system beyond the retro, the journal and `NEXT_SESSION.md`.
+- Out of scope: commits and every other git operation, working-tree cleanup, `.gitignore` management for `NEXT_SESSION.md`, any memory system beyond the retro, the journal and `NEXT_SESSION.md`.

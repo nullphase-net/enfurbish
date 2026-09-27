@@ -2,7 +2,7 @@
 
 Intentional session continuity for Claude Code.
 
-A plugin that closes the loop between Claude Code sessions: `/wrap` ends a session by producing a retro, a tooling-stack verdict, and a handoff note. A `SessionStart` hook names the handoff at the start of the next session without loading it. `/next` is what actually opens it.
+A plugin that closes the loop between Claude Code sessions: `/wrap` ends a session by producing a retro, a tooling-stack verdict, and a handoff note. A `SessionStart` hook names the handoff at the start of the next session without loading it. `/next` is what actually opens it, and what reads past retros when you ask what earlier sessions did.
 
 ## Commands
 
@@ -14,6 +14,8 @@ Run at the end of a session. Produces three files:
 - **Tooling-journal entry** — appended to `~/.claude/tooling-journal.md`. Cross-session verdicts on the parts of your stack you can change.
 - **Handoff** — `<cwd>/NEXT_SESSION.md`. What the next session should pick up. Reconciled with any existing file: items survive until they're actually done, not until the next wrap fires.
 
+The final report ends with a `Worktree:` line: uncommitted paths anywhere in the repo, how many predate the session and how old the oldest is, and commits not yet pushed to the upstream. Nothing else in the plugin sees work older than the session, so it is the one place a pile left across several sessions shows up. When some of it predates the session, the handoff carries the same line. `/wrap` never commits; that stays your call.
+
 `/wrap -q` (or `--quick`) does only the local repo work — `NEXT_SESSION.md` and any CLAUDE.md routing. No retro, no journal entry. For a session whose value is a clean pointer rather than a retrospective.
 
 The skill is three files. `SKILL.md` is the spine every wrap loads; `full.md` holds the retro and journal steps and is read only on a full wrap, so `-q` never pays for it; `rationale.md` holds the measured evidence behind each rule and is read only when a rule looks wrong for the case at hand.
@@ -22,6 +24,8 @@ The skill is three files. `SKILL.md` is the spine every wrap loads; `full.md` ho
 
 Read-only. Lists every `NEXT_SESSION.md` under the project root, reads the newest, and summarizes "Start here" + "Open threads". Reading the *newest* rather than the cwd-local one is deliberate: cwd varies between sessions in one project, and an autonomous run in a subdirectory writes its own handoff. Use when the SessionStart hook didn't fire or you want to re-consult mid-session.
 
+Asked what earlier sessions did or decided, `/next` reads this project's retros instead. They are matched on each retro's own `**Cwd:**` line, so sessions run from a subdirectory count and a project whose name merely ends the same way does not.
+
 The listing is a CLI you can run yourself:
 
 ```bash
@@ -29,6 +33,8 @@ bun run lib/handoffs.ts --cwd "$(pwd)"          # every handoff, newest first
 bun run lib/handoffs.ts --check ./NEXT_SESSION.md   # assistant | edited | unstamped, and what to do about it
 bun run lib/handoffs.ts --check ./NEXT_SESSION.md 2026-09-18T12:00:00Z  # ...:during | ...:prior
 bun run lib/handoffs.ts --since ./NEXT_SESSION.md   # what landed after its header
+bun run lib/handoffs.ts --retros                     # this project's retros, newest first
+bun run lib/handoffs.ts --retros 'stream(ing)? parser'   # the newest 10 that mention it
 ```
 
 ```
@@ -133,7 +139,9 @@ The retro and journal entry are informed by `scan.ts`, which parses the current 
 - Hooks that fired during the session and how many times
 - `compaction_count` — number of `compact_boundary` events. A compaction does not truncate the transcript, so the counts above still cover the whole session.
 - Skills invoked — both `Skill` tool calls and slash commands typed by the user, so built-in commands (`/clear`, `/compact`) appear here too
-- Files edited (most-recent first, capped at 50)
+- Files edited (most-recent first, capped at 50), from Edit/Write records only
+- `files_changed`: what git says moved in the repo since the session started, commits plus dirty files modified inside the window. It catches the writes `files_edited` cannot see (heredocs, patch scripts, `cp`), and it is repo-scoped, not session-scoped.
+- `worktree`: uncommitted and unpushed work in the repo, not bounded by time. `summary` is the final report's `Worktree:` line; `before_session` counts uncommitted paths older than the session.
 - Number of files read
 
 Subagent activity (`isSidechain: true`) is filtered out — those events belong to the subagent's own session, not the parent's stats.
