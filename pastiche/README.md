@@ -94,6 +94,7 @@ bun run lib/pastiche.ts --add km "ទឹក (teuk) — water" "family, food"
 bun run lib/pastiche.ts --add km - "rf, hardware"  # ...or several, one per stdin line
 bun run lib/pastiche.ts --tag "teuk" "family, food"   # tag something already there
 bun run lib/pastiche.ts --correct es "costa" "cuesta" "costar is o→ue, stressed forms only"
+bun run lib/pastiche.ts --dedupe                   # merge each term's copies into one line
 bun run lib/pastiche.ts --path                     # resolved ledger path
 ```
 
@@ -127,6 +128,15 @@ how many there are. The refusal it replaced cost three or four round trips per s
 (`--add`, read the existing line, `--seen`) to reach the same write. `exists:` remains for the
 one case with nothing to restamp: the body is in the file, but under a different language or
 inside another term's gloss.
+
+A ledger written before this has its copies still in it. `--dedupe` merges each term's copies
+into the first one, which keeps its gloss and introduce date and takes the latest `seen:`, the
+most marks and every copy's subject; the other glosses are dropped, so commit the ledger first
+if you want them. The first gloss is the original and usually the broadest (`threshold` rather
+than `the 16384-byte threshold`). Copies were harmless while they rotated together, but the
+per-session dormancy count keys on the whole line, so two copies of one term could fall out of
+step and take two due slots. After an `--add`, the count line shows terms beside lines whenever
+the two differ.
 
 `--seen`, `--mark` and `--tag` name a term the same way, and every line of that term moves
 together. The exact term wins (`la red` moves `la red`, not `la redirección` or `la red

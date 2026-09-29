@@ -300,6 +300,7 @@ export function termsContaining(entries: Entry[], needle: string): string[] {
  * `marks` seeds the optional third field — `✗` for a correction, so a later
  * `mark()` reads `✓✗`: got it wrong once, right since. `subject` seeds `subj:`,
  * which always follows the marks so `mark()` can find the marks by position.
+ * `seen` defaults to the introduce date; only `dedupe` passes another.
  */
 export function formatEntry(
   code: string,
@@ -307,12 +308,64 @@ export function formatEntry(
   date: string,
   marks?: string,
   subject?: string,
+  seen = date,
 ): string {
   const fields = [body, date];
   if (marks) fields.push(marks);
   if (subject) fields.push(`subj: ${subject}`);
-  fields.push(`seen: ${date}`);
+  fields.push(`seen: ${seen}`);
   return `- ${code}: ${fields.join(" | ")}`;
+}
+
+/**
+ * Merge each term's copies (`sameTerm`'s key: language + `termKey`) into the first
+ * copy, in place. It keeps its gloss and introduce date and takes the latest `seen:`,
+ * the longest marks (one pre-0.8.0 `--mark` stamped every copy at once, so a sum
+ * over-counts) and every copy's subject parts, in order. The first gloss is the
+ * original, and across the biggest groups the broader one: `el umbral` is
+ * "threshold" there and "the 16384-byte threshold" last, and the first `el registro`
+ * carries its false-friend note (owner's choice, 2026-09-29). Lines are appended, so
+ * the first copy is the earliest: all 79 real groups ran in date order. The other
+ * glosses survive only in the ledger's own history.
+ *
+ * `--add` stopped minting copies in 0.8.0, and these were left in place then because
+ * they had cost the due list nothing. On 2026-09-29 79 terms still held 193 extra
+ * lines, and one term (el intento) took 2 of 5 due slots.
+ */
+export function dedupe(text: string): { text: string; merged: string[] } {
+  const lines = text.split("\n");
+  const byTerm = new Map<string, number[]>();
+  lines.forEach((l, i) => {
+    const e = parseLedger(l)[0];
+    if (!e) return;
+    const k = `${e.code}\t${termKey(e.term)}`;
+    byTerm.set(k, [...(byTerm.get(k) ?? []), i]);
+  });
+  const drop = new Set<number>();
+  const merged: [string, number][] = [];
+  for (const idx of byTerm.values()) {
+    if (idx.length < 2) continue;
+    const es = idx.map(i => parseLedger(lines[i])[0]);
+    const [first] = es;
+    const marks = es
+      .map(e => e.line.split(" | ").slice(2).filter(f => !NAMED.test(f)).join(""))
+      .reduce((a, b) => (b.length > a.length ? b : a));
+    const subject = [...new Set(es.flatMap(e => e.subject.split(",").map(s => s.trim()).filter(Boolean)))];
+    lines[idx[0]] = formatEntry(
+      first.code,
+      first.term,
+      first.introduced,
+      marks || undefined,
+      subject.join(", ") || undefined,
+      es.map(e => e.seen).sort().at(-1),
+    );
+    for (const i of idx.slice(1)) drop.add(i);
+    merged.push([headOf(first.term), idx.length]);
+  }
+  return {
+    text: lines.filter((_, i) => !drop.has(i)).join("\n"),
+    merged: merged.sort((a, b) => b[1] - a[1]).map(([h, n]) => `${h} ×${n}`),
+  };
 }
 
 /**
@@ -503,6 +556,7 @@ const USAGE = `usage: pastiche.ts [--due <n>]
                                     one subject applies to the whole batch
        --tag "<term>" "<subject>"   set what an existing term is about
        --correct <code> "<wrong>" "<right>" "<rule>"
+       --dedupe                     merge each term's copies into one line
        --path`;
 
 /**
@@ -565,6 +619,18 @@ export function main(
   if (flag === "--seen") return edit(restamp, "restamped");
   if (flag === "--mark") return edit(mark, "✓");
   if (flag === "--tag") return args[2] ? edit(tag, "tagged", args[2]) : usage();
+
+  if (flag === "--dedupe") {
+    const before = read();
+    if (!before) return out(`no ledger at ${cfg.ledger} — --add starts one`), 0;
+    const { text, merged } = dedupe(before);
+    const n = parseLedger(text).length;
+    if (!merged.length) return out(`no copies: ${n} terms, one line each`), 0;
+    writeAtomic(cfg.ledger, text);
+    out(`merged ${merged.length} term${merged.length === 1 ? "" : "s"}: ${parseLedger(before).length} → ${n} lines`);
+    out(`  ${merged.slice(0, 10).join(", ")}${merged.length > 10 ? `, +${merged.length - 10} more` : ""}`);
+    return 0;
+  }
 
   if (flag === "--add" || flag === "--correct") {
     const code = args[1];
@@ -649,7 +715,11 @@ export function main(
     for (const l of added) out(`+ ${l}`);
     for (const b of skipped) out(`exists: ${b}`);
     for (const d of dupes) out(d);
-    if (added.length) out(`(${parseLedger(before).length + added.length} entries)`);
+    if (added.length) {
+      const all = parseLedger(text);
+      const terms = new Set(all.map(e => `${e.code}\t${termKey(e.term)}`)).size;
+      out(`(${all.length} entries${terms < all.length ? `, ${terms} terms` : ""})`);
+    }
     return 0;
   }
 

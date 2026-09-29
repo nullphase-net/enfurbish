@@ -594,3 +594,59 @@ describe("write output carries the line it is about", () => {
     ]);
   });
 });
+
+// Legacy copies: --add has matched by term since 0.8.0, but 79 terms still held 193
+// extra lines on 2026-09-29, and one of them (el intento) took 2 of 5 due slots.
+// The merged line takes its gloss from the first copy and its seen, marks and
+// subject from others, so a merge that keeps any one whole line fails.
+describe("--dedupe", () => {
+  const HEADER = "# ledger\n\nprose the merge must keep\n\n";
+  const COPIES =
+    "- es: el hilo — thread (of work) | 2026-08-15 | ✓ | subj: work | seen: 2026-09-20\n" +
+    "- km: ទឹក (teuk) — water | 2026-01-01 | seen: 2026-01-01\n" +
+    "- es: el hilo — the thread (an open thread) | 2026-09-04 | ✓✓ | subj: work, os | seen: 2026-09-24\n" +
+    "- es: el hilo — thread (execution thread) | 2026-09-18 | seen: 2026-09-10\n";
+
+  test("merges a term's copies into the first: its gloss and intro, the latest seen, most marks, every subject", () => {
+    const c = fixture(HEADER + COPIES);
+    const out: string[] = [];
+    expect(main(["--dedupe"], c, s => void out.push(s))).toBe(0);
+    expect(readFileSync(c.ledger, "utf8")).toBe(HEADER +
+      "- es: el hilo — thread (of work) | 2026-08-15 | ✓✓ | subj: work, os | seen: 2026-09-24\n" +
+      "- km: ទឹក (teuk) — water | 2026-01-01 | seen: 2026-01-01\n");
+    expect(out[0]).toBe("merged 1 term: 4 → 2 lines");
+    expect(out[1]).toBe("  el hilo ×3");
+  });
+
+  // The term is `termKey`: a romanization in parentheses is not part of it, so
+  // these two are one word. The language is part of it.
+  test("merges romanization variants of one term, and never across languages", () => {
+    const c = fixture(
+      "- km: អរគុណ (arkun) — thank you | 2026-08-05 | ✓✓✓✓ | seen: 2026-09-24\n" +
+      "- es: OK — okay | 2026-08-06 | seen: 2026-08-06\n" +
+      "- km: អរគុណ (arkun / awkun) — thank you | 2026-09-09 | seen: 2026-09-14\n" +
+      "- km: OK — okay | 2026-08-07 | seen: 2026-08-07\n");
+    main(["--dedupe"], c, () => {});
+    expect(readFileSync(c.ledger, "utf8")).toBe(
+      "- km: អរគុណ (arkun) — thank you | 2026-08-05 | ✓✓✓✓ | seen: 2026-09-24\n" +
+      "- es: OK — okay | 2026-08-06 | seen: 2026-08-06\n" +
+      "- km: OK — okay | 2026-08-07 | seen: 2026-08-07\n");
+  });
+
+  test("a ledger with no copies is left byte-for-byte alone, and says so", () => {
+    const c = fixture(SEED);
+    const out: string[] = [];
+    expect(main(["--dedupe"], c, s => void out.push(s))).toBe(0);
+    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
+    expect(out).toEqual(["no copies: 2 terms, one line each"]);
+  });
+
+  // Line count alone hid the copies for a month: every --add printed "(N entries)"
+  // while 193 of them were repeats. The term count prints only when it differs.
+  test("--add prints the term count beside the line count when copies exist", () => {
+    const c = fixture(COPIES);
+    const out: string[] = [];
+    main(["--add", "es", "el puerto — port"], c, s => void out.push(s));
+    expect(out.at(-1)).toBe("(5 entries, 3 terms)");
+  });
+});
