@@ -90,6 +90,21 @@ test("a loose tool match reaches every heading spelling a strict grep misses", (
   expect(matching(secs, "continuity")).toHaveLength(4);
 });
 
+// Wrap step 2 passes names from `skills_invoked`, `continuity:wrap`, and headings
+// spell that tool `continuity (wrap, scan.ts)` as often as not. Measured 2026-09-29:
+// `continuity:wrap` reached 77 of the 233 continuity sections. Every part of the
+// name must appear, so an unrelated heading holding one part stays out.
+test("a plugin:skill name reaches headings that spell it 'plugin (skill, …)', and only those", () => {
+  const secs = parseSections([
+    "## 2026-09-28T10:00:00Z  •  p  •  s",
+    "", "### continuity:wrap (skill + scan.ts)  •  verdict: helped", "- a",
+    "", "### continuity (wrap, scan.ts, handoffs.ts)  •  verdict: helped", "- b",
+    "", "### continuity (next, handoffs.ts)  •  verdict: helped", "- c",
+    "", "### wrap-up notes  •  verdict: neutral", "- d",
+  ].join("\n"));
+  expect(matching(secs, "continuity:wrap").map(s => s.body[0])).toEqual(["- a", "- b"]);
+});
+
 test("Action lines are found through every qualifier and bold variant", () => {
   const acts = findActions(matching(parseSections(DRIFTED), "continuity"));
   expect(acts).toHaveLength(4);

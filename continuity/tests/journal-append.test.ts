@@ -289,6 +289,48 @@ test("a close naming the same #id twice counts it once", () => {
   expect(res.stdout.trim()).toBe(`retired 1: #${id}`);
 });
 
+// Two wraps (2026-09-29) named an id inside `closed` only to say it stays open, and
+// the append retired it and printed "retired 1", which reads as success. A named #id
+// is retired wherever it sits in the sentence, so the append refuses the entry while
+// the writer still has it in hand. Both producers of a Closed line are covered: the
+// JSON entry and raw markdown.
+test("a close that names an #id and says it stays open is refused, and nothing is written", () => {
+  const j = manyActions();
+  const [a, b] = ["oldest idea", "middle idea"].map(t => idOf(cli(j, "--actions").stdout, t));
+  const before = readFileSync(j, "utf8");
+  // The measured shape: one close retires one id and keeps its neighbour.
+  const res = run(j, entry([`#${a} was already closed; #${b} stays open but is now bounded`]));
+  expect(res.status).toBe(2);
+  expect(res.stderr).toContain(`#${b}`);
+  expect(res.stderr).toContain("stays open");
+  expect(readFileSync(j, "utf8")).toBe(before);
+});
+
+test("a raw-markdown close that keeps an #id open is refused the same way", () => {
+  const j = manyActions();
+  const id = idOf(cli(j, "--actions").stdout, "middle idea");
+  const before = readFileSync(j, "utf8");
+  const res = run(j, `## 2026-09-04T10:00:00Z  •  proj  •  dddd4444\n\n### toolD  •  verdict: neutral\n` +
+    `- Closed: #${id} tracks extending it to all cases and stays open.\n`);
+  expect(res.status).toBe(2);
+  expect(readFileSync(j, "utf8")).toBe(before);
+});
+
+// The other direction. Both closes below are copied from the real journal and
+// retire correctly; a check widened to a bare "open" or "re-open" refuses them.
+// A keep-open phrase in a close with no #id retires nothing, so it is not refused.
+test("'open' in a close's prose, or a keep-open phrase with no #id, is not refused", () => {
+  const j = manyActions();
+  const [a, b] = ["oldest idea", "middle idea"].map(t => idOf(cli(j, "--actions").stdout, t));
+  const res = run(j, entry([
+    `#${a} -- never: a leading-id-run rule re-opens 17 correctly retired ids`,
+    `#${b} moved to the notes store, a question in the open-source-release arc`,
+    "newest idea stays open (hash omitted so this close does not retire it)",
+  ]));
+  expect(res.status).toBe(0);
+  expect(res.stdout).toContain(`retired 2: #${a} #${b}`);
+});
+
 test("appending an action that says none reports it was written as a note", () => {
   const j = seeded();
   const entry = JSON.stringify({

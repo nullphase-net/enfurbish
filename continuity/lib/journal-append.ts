@@ -142,11 +142,20 @@ export function parseSections(text: string): Section[] {
  * heading is free text a model composed, so `continuity` must reach
  * `Hook: SessionStart (ponytail + continuity + pastiche)` as well as
  * `continuity scan.ts`.
+ *
+ * A name with a `:` or a space matches when every part does, anywhere in the
+ * heading: `continuity:wrap` is what `skills_invoked` hands wrap step 2, and it
+ * reached 77 of 233 continuity sections because half of them spell the tool
+ * `continuity (wrap, scan.ts)` (2026-09-29). Anything the whole string matched,
+ * its parts still match.
  */
 export function matching(secs: Section[], tool?: string): Section[] {
   if (!tool) return secs;
-  const q = tool.toLowerCase();
-  return secs.filter(s => s.heading.toLowerCase().includes(q));
+  const parts = tool.toLowerCase().split(/[:\s]+/).filter(Boolean);
+  return secs.filter(s => {
+    const h = s.heading.toLowerCase();
+    return parts.every(p => h.includes(p));
+  });
 }
 
 /**
@@ -308,6 +317,25 @@ export function reportCloses(before: Section[], added: Section[]): string[] {
   return [...(retired.size ? [`retired ${retired.size}: ${[...retired].join(" ")}`] : []), ...problems];
 }
 
+/**
+ * A close that names an #id and says the item stays open. The id is retired
+ * wherever it sits in the sentence, so this is always a mistake, and "retired 1"
+ * afterwards reads as success: two wraps did it on 2026-09-29. Over the 134 closes
+ * then on disk this set hit 3, those two and one correct close ("moved: still open,
+ * carried in …") that a writer would now have to reword. "re-open" and a bare "open"
+ * are left out; both occur in correct closes.
+ */
+const KEEP_OPEN = /\b(?:stays?|still|remains?|kept|keeps?|keeping|left|leave|leaving)\s+(?:(?:it|this|them)\s+)?open\b|\bnot\s+(?:yet\s+)?(?:closed|retired)\b/i;
+
+/** Why each close in an entry would retire an id it says to keep; empty when none would. */
+export function keptOpen(added: Section[]): string[] {
+  return findClosed(added).flatMap(c => {
+    const ids = idsIn(c.text);
+    const m = KEEP_OPEN.exec(c.text);
+    return ids.length && m ? [`closed names ${ids.map(i => `#${i}`).join(" ")} and says "${m[0]}"`] : [];
+  });
+}
+
 export function reportRecent(secs: Section[], tool: string, limit: number): string {
   const hit = matching(secs, tool);
   const head = `${hit.length} section${hit.length === 1 ? "" : "s"} · "${tool}" · ${spellings(hit)} spellings · showing last ${Math.min(limit, hit.length)}`;
@@ -390,6 +418,15 @@ if (import.meta.main) {
       process.stderr.write(`journal-append: stdin looked like JSON but ${e?.message ?? e}\n`);
       process.exit(2);
     }
+  }
+
+  // Refused before the write, not reported after it: once on disk the id is
+  // retired, and re-opening it takes a fresh action. Raw markdown is checked too.
+  const kept = keptOpen(parseSections(entry));
+  if (kept.length) {
+    process.stderr.write(`journal-append: nothing written\n${kept.join("\n")}\n` +
+      "a close retires every #id it names, wherever it sits; say what stays open in notes\n");
+    process.exit(2);
   }
 
   const existing = read();
