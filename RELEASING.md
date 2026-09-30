@@ -15,8 +15,10 @@ Each plugin (`continuity/`, `affirm/`, `pastiche/`) ships independently. There i
 Each entry in `.claude-plugin/marketplace.json` is a `git-subdir` source pinned to that plugin's tag:
 
 ```json
-"source": { "source": "git-subdir", "url": "nullphase-net/enfurbish", "path": "pastiche", "ref": "pastiche-v0.10.1" }
+"source": { "source": "git-subdir", "url": "https://github.com/nullphase-net/enfurbish.git", "path": "pastiche", "ref": "pastiche-v0.10.1" }
 ```
+
+The `url` is the full HTTPS URL, never the `owner/repo` shorthand. Claude Code expands the shorthand to `git@github.com:owner/repo.git` unless `CLAUDE_CODE_PLUGIN_PREFER_HTTPS` or `CLAUDE_CODE_REMOTE` is set, and a `git-subdir` clone has no HTTPS fallback. On a machine with no GitHub SSH key the update then fails with "Could not read from remote repository". Measured 2026-09-30 on a work machine, then read in Claude Code 2.1.285, where the shorthand expands to SSH and only those two variables switch it to HTTPS.
 
 Claude Code reads the catalog from `main`, because the marketplace was added with no `ref`. It fetches each plugin's directory at the tag the catalog names. So `main` can carry unreleased work: nothing reaches an install until its pin moves.
 
