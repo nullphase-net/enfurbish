@@ -181,8 +181,8 @@ function manifests(name: string, running: string, here: string) {
 
 test("supersededNote names both versions and the way to ship when they differ", () => {
   const { pluginRoot, projectDir } = manifests("affirm", "0.1.0", "0.2.0");
-  const line = "affirm 0.1.0 is running, but this checkout has 0.2.0. It reaches sessions only through the " +
-    "marketplace: push, then `claude plugin update affirm@mkt`, then /reload-plugins.";
+  const line = "affirm 0.1.0 is running, but this checkout has 0.2.0. It reaches sessions only once released: tag it, " +
+    "pin the tag in marketplace.json, push, then `claude plugin update affirm@mkt`, then /reload-plugins.";
   expect(supersededNote(pluginRoot, projectDir)).toBe(line);
   expect(supersededNote(pluginRoot, join(projectDir, "affirm"))).toBe(line); // cwd = the plugin's own dir
 });

@@ -80,7 +80,7 @@ export function supersededNote(pluginRoot: string, projectDir: string): string {
   const market = /\/plugins\/cache\/([^/]+)\//.exec(pluginRoot)?.[1];
   const update = market ? `\`claude plugin update ${running.name}@${market}\`` : "update the plugin";
   return `${running.name} ${running.version} is running, but this checkout has ${here.version}. ` +
-    `It reaches sessions only through the marketplace: push, then ${update}, then /reload-plugins.`;
+    `It reaches sessions only once released: tag it, pin the tag in marketplace.json, push, then ${update}, then /reload-plugins.`;
 }
 
 if (import.meta.main) {
