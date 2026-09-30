@@ -46,9 +46,23 @@ If a change touches more than one plugin, version each one on its own and give e
 4. Tag the last commit of the release on `main` — the bump commit unless something landed after it. `git tag -a <plugin>-vX.Y.Z <commit> -m "<plugin> X.Y.Z — <one-line>"`; pass the sha explicitly rather than relying on where HEAD happens to sit.
 5. Pin it: set that plugin's `ref` in `.claude-plugin/marketplace.json` to the new tag and commit. `claude plugin validate .` checks the file.
 6. Push branch and tag together: `git push --atomic origin main <plugin>-vX.Y.Z`.
-7. On any machine running the plugin, run `claude plugin update <name>@enfurbish` (or `/plugin update`), then `/reload-plugins`. The installed copy is a snapshot under `cache/`, not a clone, and auto-update is off for a third-party marketplace unless someone turned it on, so nothing arrives until then.
+7. Install it from GitHub the way a user with no GitHub SSH key would. The config dir is a throwaway, and SSH is made keyless:
 
-Until step 7 runs, each plugin's `SessionStart` hook says so in any session whose cwd is this checkout (or the plugin's own directory in it): `continuity 0.11.0 is running, but this checkout has 0.12.0. …` on both channels. It compares the running copy's `plugin.json` against the checkout's, so it also fires after a checkout moves back to an older commit, and while a bump on `main` waits for its release.
+   ```bash
+   p=<plugin>; t=$p-vX.Y.Z
+   d=$(mktemp -d) && (
+     export CLAUDE_CONFIG_DIR="$d" GIT_TERMINAL_PROMPT=0 \
+       GIT_SSH_COMMAND='ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -i /dev/null -o BatchMode=yes'
+     claude plugin marketplace add nullphase-net/enfurbish && claude plugin install "$p@enfurbish"
+   ) && jq -r --arg k "$p@enfurbish" '.plugins[$k][0] | "\(.version) \(.gitCommitSha)"' "$d/plugins/installed_plugins.json"
+   echo "$(git show "$t:$p/.claude-plugin/plugin.json" | jq -r .version) $(git rev-parse "$t^{commit}")"
+   rm -rf "$d"
+   ```
+
+   The two printed lines must match. A clone error naming `git@github.com` means a `url` in `marketplace.json` is not the HTTPS form (see "What installs"). A clone error naming the tag means the push did not carry it. A version or sha that differs means the pin names a different tag, or the tagged commit was not bumped. `claude plugin validate .` passes in all three cases.
+8. On any machine running the plugin, run `claude plugin update <name>@enfurbish` (or `/plugin update`), then `/reload-plugins`. The installed copy is a snapshot under `cache/`, not a clone, and auto-update is off for a third-party marketplace unless someone turned it on, so nothing arrives until then.
+
+Until step 8 runs, each plugin's `SessionStart` hook says so in any session whose cwd is this checkout (or the plugin's own directory in it): `continuity 0.11.0 is running, but this checkout has 0.12.0. …` on both channels. It compares the running copy's `plugin.json` against the checkout's, so it also fires after a checkout moves back to an older commit, and while a bump on `main` waits for its release.
 
 ## Where to look if it doesn't update
 
