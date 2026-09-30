@@ -10,6 +10,7 @@
       "name": "continuity",
       "source": { "source": "git-subdir", "url": "nullphase-net/enfurbish", "path": "continuity", "ref": "continuity-v0.16.1" },
       "description": "Intentional session continuity: /wrap retro, /next command, and a SessionStart hook that surfaces NEXT_SESSION.md handoffs.",
+      "author": { "name": "phreakocious" },
       "category": "workflow",
       "keywords": ["session", "continuity", "retro", "handoff", "skills"]
     },
@@ -17,6 +18,7 @@
       "name": "affirm",
       "source": { "source": "git-subdir", "url": "nullphase-net/enfurbish", "path": "affirm", "ref": "affirm-v0.8.1" },
       "description": "Approval gate for project instructions. Surfaces new or modified CLAUDE.md and .claude/rules/* files at session start before Claude treats them as trusted.",
+      "author": { "name": "phreakocious" },
       "category": "security",
       "keywords": ["security", "prompt-injection", "claudemd", "approval", "guard"]
     },
@@ -24,6 +26,7 @@
       "name": "pastiche",
       "source": { "source": "git-subdir", "url": "nullphase-net/enfurbish", "path": "pastiche", "ref": "pastiche-v0.10.1" },
       "description": "Ambient language learning. A SessionStart hook weaves vocabulary into ordinary sessions — stale items you are forgetting, a small budget of new terms drawn from the work itself, and anything you use unprompted recorded rather than taught back at you. The ledger is a markdown file you own, written by a CLI rather than by hand.",
+      "author": { "name": "phreakocious" },
       "category": "workflow",
       "keywords": ["language", "learning", "vocabulary", "immersion", "ledger"]
     }
