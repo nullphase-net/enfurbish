@@ -3,6 +3,7 @@
   "description": "Approval gate for instruction files. Surfaces new or modified CLAUDE.md, CLAUDE.local.md, .claude/rules/* and AGENTS.md files (project, parent directories and user-global) and the files they @import at session start; the user explicitly affirms them before Claude treats them as trusted.",
   "version": "0.8.1",
   "license": "MIT",
+  "author": { "name": "phreakocious" },
   "keywords": [
     "security",
     "prompt-injection",

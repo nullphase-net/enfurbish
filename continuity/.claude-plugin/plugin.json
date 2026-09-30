@@ -3,5 +3,6 @@
   "description": "Intentional session continuity for Claude Code: /wrap writes a retro, a tooling-journal entry and a NEXT_SESSION.md handoff; /next reads the handoff and past retros; a SessionStart hook says when a handoff exists.",
   "version": "0.16.1",
   "license": "MIT",
+  "author": { "name": "phreakocious" },
   "keywords": ["session", "continuity", "retro", "handoff", "skills"]
 }
