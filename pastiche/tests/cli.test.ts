@@ -244,6 +244,12 @@ describe("default and --path", () => {
     expect(main(["--bogus"], fixture(SEED))).toBe(2);
   });
 
+  test("--due ends with how many terms are untagged", () => {
+    const out: string[] = [];
+    main(["--due", "1"], fixture(SEED), s => void out.push(s));
+    expect(out.at(-1)).toBe("2 of 2 terms untagged");
+  });
+
   test("--due with a non-numeric count is arg misuse", () => {
     expect(main(["--due", "lots"], fixture(SEED))).toBe(2);
   });
@@ -408,6 +414,22 @@ describe("--tag", () => {
     expect(readFileSync(c.ledger, "utf8"))
       .toContain("- es: la red — network | 2026-02-01 | ✓ | subj: networking | seen: 2026-02-01");
     expect(out[0]).toBe('tagged "la red" -> networking');
+  });
+
+  // Retagging replaced the old subject and printed only the new line, so the loss
+  // was invisible (journal #3895c2). Untagged terms have nothing to report.
+  test("retagging says which subject it replaced; a first tag says nothing about one", () => {
+    const c = fixture(SEED);
+    const first: string[] = [];
+    main(["--tag", "la red", "networking"], c, s => void first.push(s));
+    expect(first.some(l => l.startsWith("  was:"))).toBe(false);
+    const again: string[] = [];
+    main(["--tag", "la red", "rf, hardware"], c, s => void again.push(s));
+    expect(again).toEqual([
+      'tagged "la red" -> rf, hardware',
+      "  was: networking",
+      "  now: es: la red — network | 2026-02-01 | ✓ | subj: rf, hardware | seen: 2026-02-01",
+    ]);
   });
 
   test("a missing subject is arg misuse, not a silent no-op", () => {
@@ -591,6 +613,7 @@ describe("write output carries the line it is about", () => {
     expect(out).toEqual([
       "2026-01-01  km: ទឹក (teuk) — water  [family]",
       "2026-02-01  es: la red — network  [untagged]",
+      "1 of 2 terms untagged",
     ]);
   });
 });

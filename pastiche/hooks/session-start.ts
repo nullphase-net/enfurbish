@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
-  buildContext, loadConfig, loadNotes, loadSurfaced, parseLedger, recordSurfaced, rotatedBy,
+  buildContext, loadConfig, loadNotes, loadSurfaced, parseLedger, recordSurfaced, rotatedBy, untaggedCount,
   saveSurfaced, stalest, today, type Entry,
 } from "../lib/pastiche";
 
@@ -36,7 +36,8 @@ export function buildOutput(pluginRoot: string, sessionId: string | null = null)
   if (!cfg.languages.length) return null;
   const text = existsSync(cfg.ledger) ? readFileSync(cfg.ledger, "utf8") : "";
   const surfaced = loadSurfaced(cfg.surfaced);
-  const due = stalest(parseLedger(text), cfg.due, surfaced);
+  const entries = parseLedger(text);
+  const due = stalest(entries, cfg.due, surfaced);
   // Re-injecting after a compaction is the point (vocabulary the model can't see
   // is vocabulary it can't use), so there is no re-fire suppression here; the
   // count dedupes on session_id instead.
@@ -50,7 +51,9 @@ export function buildOutput(pluginRoot: string, sessionId: string | null = null)
       debugLog(`surfaced not saved: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  return buildContext({ cfg, due, rotated, notes: loadNotes(pluginRoot, cfg), pluginRoot });
+  return buildContext({
+    cfg, due, rotated, untagged: untaggedCount(entries), notes: loadNotes(pluginRoot, cfg), pluginRoot,
+  });
 }
 
 /**

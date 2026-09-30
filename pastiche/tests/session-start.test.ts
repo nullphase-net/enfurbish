@@ -112,6 +112,21 @@ describe("session-start hook", () => {
     expect(ctx).toContain("aspiration");  // km language notes came along
   });
 
+  test("counts the untagged terms from the ledger it read", async () => {
+    const dir = freshDir();
+    writeFileSync(join(dir, "config.json"), JSON.stringify({
+      ledger: join(dir, "ledger.md"),
+      due: 1,
+      languages: [{ code: "km", name: "Khmer", domains: "everyday" }],
+    }));
+    writeFileSync(join(dir, "ledger.md"),
+      "- km: ទឹក (teuk) — water | 2026-01-01 | seen: 2026-01-01\n" +
+      "- km: ផ្ទះ (phteah) — house | 2026-01-01 | subj: home | seen: 2026-06-01\n");
+    const { stdout } = await runHook(dir);
+    expect(JSON.parse(stdout).hookSpecificOutput.additionalContext.split("Due for re-surfacing")[1])
+      .toContain("1 of 2 terms untagged");
+  });
+
   // 7c2, end to end: the count lives in a sidecar the hook owns, keyed by session.
   function twoTerms(): string {
     const dir = freshDir();

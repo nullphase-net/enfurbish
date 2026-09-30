@@ -66,7 +66,9 @@ tag the model re-derives that subject from the gloss every session, and measured
 seven sessions it kept re-deriving the same three — ប៉ា (dad), la tierra (electrical ground),
 la valuación — into technical work they could never fit. The tag doesn't filter anything;
 it hands over evidence the ledger already had. An untagged line surfaces marked `[untagged]`,
-which asks the session to derive the subject and tag it.
+which asks the session to derive the subject and tag it. The due list, in the hook and from
+`--due`, ends with how many terms are still untagged, so a backlog can be seen and worked
+down. `--tag` on a term that already has a subject prints the one it replaced.
 
 Rotation has two inputs. Sessions restamp what they use, so used items move to the back and
 unused ones drift to the front. And an item the hook shows in 3 sessions that never use it

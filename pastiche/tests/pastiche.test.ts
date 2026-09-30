@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildContext, DORMANT_AFTER, formatCorrection, formatEntry, loadConfig, loadNotes, mark,
-  parseLedger, recordSurfaced, restamp, stalest, tag, today, type Entry, type Surfaced,
+  parseLedger, recordSurfaced, restamp, stalest, tag, today, untaggedCount, type Entry, type Surfaced,
 } from "../lib/pastiche";
 
 const LEDGER = `# Ledger
@@ -220,6 +220,19 @@ describe("loadConfig", () => {
   });
 });
 
+// Two sessions each tagged 5 terms and neither could see how many remained
+// (journal #ec85f2). A term counts once: copies of one term are one term, and it is
+// tagged if any copy is (3 legacy groups carried the tag on an older copy only).
+test("untaggedCount counts terms, not lines, and a term is tagged if any copy is", () => {
+  const e = parseLedger(
+    "- es: el hilo — thread | 2026-08-15 | subj: work | seen: 2026-09-20\n" +
+    "- es: el hilo — the thread | 2026-09-04 | seen: 2026-09-24\n" +
+    "- es: la red — network | 2026-02-01 | seen: 2026-02-01\n" +
+    "- es: la red — the net | 2026-02-02 | subj: networking | seen: 2026-02-02\n" +
+    "- km: ទឹក (teuk) — water | 2026-01-01 | seen: 2026-01-01\n");
+  expect(untaggedCount(e)).toEqual({ n: 1, of: 3 });
+});
+
 describe("buildContext", () => {
   const cfg = {
     ledger: "/tmp/ledger.md",
@@ -236,6 +249,14 @@ describe("buildContext", () => {
     expect(out).toContain("[last used 2026-01-05]");
     expect(out).toContain("Khmer (km) — everyday, family");
     expect(out).toContain("/plugins/pastiche/lib/pastiche.ts");
+  });
+
+  test("says how many terms are untagged under the due list, and nothing when none are", () => {
+    const due = stalest(parseLedger(LEDGER), 2);
+    const some = buildContext({ cfg, due, untagged: { n: 3, of: 5 }, notes: "", pluginRoot: "/p" });
+    expect(some.split("Due for re-surfacing")[1]).toContain("3 of 5 terms untagged");
+    const none = buildContext({ cfg, due, untagged: { n: 0, of: 5 }, notes: "", pluginRoot: "/p" });
+    expect(none).not.toContain("terms untagged");
   });
 
   test("an empty ledger asks for a first batch instead of going quiet", () => {

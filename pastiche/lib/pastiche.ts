@@ -338,8 +338,7 @@ export function dedupe(text: string): { text: string; merged: string[] } {
   lines.forEach((l, i) => {
     const e = parseLedger(l)[0];
     if (!e) return;
-    const k = `${e.code}\t${termKey(e.term)}`;
-    byTerm.set(k, [...(byTerm.get(k) ?? []), i]);
+    byTerm.set(termOf(e), [...(byTerm.get(termOf(e)) ?? []), i]);
   });
   const drop = new Set<number>();
   const merged: [string, number][] = [];
@@ -386,10 +385,12 @@ export function buildContext(opts: {
   due: Entry[];
   /** The due items this session's showing rotated to the back (`rotatedBy`). */
   rotated?: Entry[];
+  /** `untaggedCount` over the whole ledger; rendered only when some are untagged. */
+  untagged?: { n: number; of: number };
   notes: string;
   pluginRoot: string;
 }): string {
-  const { cfg, due, rotated = [], notes, pluginRoot } = opts;
+  const { cfg, due, rotated = [], untagged, notes, pluginRoot } = opts;
   const langs = cfg.languages.length
     ? cfg.languages.map(l => `- ${l.name} (${l.code}) — ${l.domains}`).join("\n")
     : "- (none configured — see the plugin README)";
@@ -403,6 +404,7 @@ export function buildContext(opts: {
     ? `\n  rotated to back (shown in ${DORMANT_AFTER} sessions since last use): ` +
       rotated.map(e => `${e.code}: ${headOf(e.term)}`).join(", ")
     : "";
+  const untaggedLine = untagged?.n ? `\n  ${untagged.n} of ${untagged.of} terms untagged` : "";
   const freshRule = cfg.fresh > 0
     ? `\nIntroduce up to ${cfg.fresh} new term${cfg.fresh === 1 ? "" : "s"} per session, drawn from what the work is
 actually about. Append each to the ledger. This budget is separate from the due
@@ -460,7 +462,7 @@ ${notes}
 Ledger: ${cfg.ledger}
 
 Due for re-surfacing (stalest first):
-${dueList}${rotatedLine}
+${dueList}${rotatedLine}${untaggedLine}
 
 Write the ledger with these, never by editing the file — they own the format:
   P=${join(pluginRoot, "lib", "pastiche.ts")}
@@ -501,6 +503,22 @@ export function headOf(body: string): string {
  */
 export function termKey(body: string): string {
   return headOf(body).split(" (")[0].trim();
+}
+
+/** One term across its copies: the language and the `termKey`. */
+export function termOf(e: Entry): string {
+  return `${e.code}\t${termKey(e.term)}`;
+}
+
+/**
+ * Terms with no `subj:` on any copy, out of all terms. Two sessions each tagged five
+ * and neither could see how many remained (journal #ec85f2). Terms, not lines: 3
+ * legacy groups carried the tag on an older copy only.
+ */
+export function untaggedCount(entries: Entry[]): { n: number; of: number } {
+  const tagged = new Map<string, boolean>();
+  for (const e of entries) tagged.set(termOf(e), (tagged.get(termOf(e)) ?? false) || !!e.subject);
+  return { n: [...tagged.values()].filter(t => !t).length, of: tagged.size };
 }
 
 /**
@@ -574,7 +592,7 @@ export function main(
   const read = () => (existsSync(cfg.ledger) ? readFileSync(cfg.ledger, "utf8") : "");
   const usage = (): number => (process.stderr.write(`${USAGE}\n`), 2);
 
-  const edit = (fn: typeof restamp, verb: string, arg = today()): number => {
+  const edit = (fn: typeof restamp, verb: string, arg = today(), was?: (line: string) => string): number => {
     const needle = args[1];
     if (!needle) return usage();
     const before = read();
@@ -612,13 +630,20 @@ export function main(
     writeAtomic(cfg.ledger, after);
     // The line it landed on: a fragment that resolves to one term (`teuk`) is only
     // checkable if the output names the term it resolved to.
-    return out(`${verb} ${JSON.stringify(needle)} -> ${arg}${n}`), out(`  now: ${fn(hits[0], needle, arg).slice(2)}`), 0;
+    out(`${verb} ${JSON.stringify(needle)} -> ${arg}${n}`);
+    // What the write replaced, when it replaced something: a retag dropped the old
+    // subject and printed only the new line (journal #3895c2).
+    const prev = was?.(hits[0]);
+    if (prev) out(`  was: ${prev}`);
+    return out(`  now: ${fn(hits[0], needle, arg).slice(2)}`), 0;
   };
 
   if (flag === "--path") return out(cfg.ledger), 0;
   if (flag === "--seen") return edit(restamp, "restamped");
   if (flag === "--mark") return edit(mark, "✓");
-  if (flag === "--tag") return args[2] ? edit(tag, "tagged", args[2]) : usage();
+  if (flag === "--tag") {
+    return args[2] ? edit(tag, "tagged", args[2], l => parseLedger(l)[0]?.subject ?? "") : usage();
+  }
 
   if (flag === "--dedupe") {
     const before = read();
@@ -717,7 +742,7 @@ export function main(
     for (const d of dupes) out(d);
     if (added.length) {
       const all = parseLedger(text);
-      const terms = new Set(all.map(e => `${e.code}\t${termKey(e.term)}`)).size;
+      const terms = new Set(all.map(termOf)).size;
       out(`(${all.length} entries${terms < all.length ? `, ${terms} terms` : ""})`);
     }
     return 0;
@@ -736,6 +761,8 @@ export function main(
   }
   const hidden = entries.length - Math.min(n, entries.length);
   if (hidden > 0) out(`+${hidden} fresher`);
+  const u = untaggedCount(entries);
+  if (u.n) out(`${u.n} of ${u.of} terms untagged`);
   return 0;
 }
 
