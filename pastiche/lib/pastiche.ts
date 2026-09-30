@@ -205,12 +205,17 @@ export function restamp(text: string, needle: string, date: string): string {
  * Rewrite `seen:` to `date` on exactly `lines`: `--add`'s dupes, one language's.
  * A hand-written line with no `seen:` gets one, as `mark()` and `tag()` do: left
  * alone it read as "already current" while the due list kept its introduce date.
+ * `subject`, when given, is set on the same lines first.
  */
-function restampLines(text: string, lines: Iterable<string>, date: string): string {
+function restampLines(text: string, lines: Iterable<string>, date: string, subject?: string): string {
   const hit = new Set(lines);
   return text
     .split("\n")
-    .map(l => (!hit.has(l) ? l : SEEN.test(l) ? l.replace(SEEN, `seen: ${date}`) : `${l} | seen: ${date}`))
+    .map(l => {
+      if (!hit.has(l)) return l;
+      if (subject) l = tagLine(l, subject);
+      return SEEN.test(l) ? l.replace(SEEN, `seen: ${date}`) : `${l} | seen: ${date}`;
+    })
     .join("\n");
 }
 
@@ -254,14 +259,15 @@ export function tag(text: string, needle: string, subject: string): string {
   const hit = new Set(matchingLines(text, needle));
   return text
     .split("\n")
-    .map(l => {
-      if (!hit.has(l)) return l;
-      if (SUBJ.test(l)) return l.replace(SUBJ, `subj: ${subject}`);
-      if (!SEEN.test(l)) return `${l} | subj: ${subject}`;
-      const parts = l.split(" | ");
-      return [...parts.slice(0, -1), `subj: ${subject}`, parts.at(-1)].join(" | ");
-    })
+    .map(l => (hit.has(l) ? tagLine(l, subject) : l))
     .join("\n");
+}
+
+function tagLine(l: string, subject: string): string {
+  if (SUBJ.test(l)) return l.replace(SUBJ, `subj: ${subject}`);
+  if (!SEEN.test(l)) return `${l} | subj: ${subject}`;
+  const parts = l.split(" | ");
+  return [...parts.slice(0, -1), `subj: ${subject}`, parts.at(-1)].join(" | ");
 }
 
 /**
@@ -716,12 +722,18 @@ export function main(
       // out with it — it is data about the ledger's shape, not noise.
       const hits = sameTerm(text, code, b);
       if (hits.length) {
-        const after = restampLines(text, hits, date);
-        const state = after === text ? "already" : "restamped";
+        // The subject fills a term no copy is tagged on, and never replaces one:
+        // that is --tag's job, and a batch's one subject is coarser than a term's
+        // own. Until 0.10.1 a repeat dropped it and said nothing (2026-09-30).
+        const had = hits.map(l => SUBJ.exec(l)?.[1].trim()).find(Boolean);
+        const fill = had ? undefined : subject;
+        const after = restampLines(text, hits, date, fill);
+        const state = restampLines(text, hits, date) === text ? "already" : "restamped";
+        const note = fill ? "; tagged" : subject && had !== subject ? `; kept subj: ${had}` : "";
         dupes.push(
-          `dupe: ${headOf(b)} ×${hits.length} — ${state} ${date}`,
+          `dupe: ${headOf(b)} ×${hits.length} — ${state} ${date}${note}`,
           // Whole: the stamp is at the end, and 305 of 668 real lines ran past a 96-char cut.
-          `  have: ${restampLines(hits[0], hits, date).slice(2)}`,
+          `  have: ${restampLines(hits[0], hits, date, fill).slice(2)}`,
         );
         text = after;
         continue;

@@ -481,6 +481,52 @@ describe("--add with a subject", () => {
     expect(readFileSync(c.ledger, "utf8"))
       .toContain(`- es: el hilo — thread | ${NOW} | seen: ${NOW}`);
   });
+
+  // A repeat restamped and dropped the subject, and said nothing (2026-09-30).
+  test("a repeat of an untagged term takes the subject, on every copy", () => {
+    const c = fixture(
+      "- es: el umbral — threshold | 2026-08-15 | seen: 2026-09-01\n" +
+      "- es: la cota — bound (cf. el umbral) | 2026-08-16 | seen: 2026-09-02\n" +
+      "- es: el umbral — threshold (cruzar el umbral) | 2026-08-17 | ✓ | seen: 2026-09-03\n",
+    );
+    const out: string[] = [];
+    expect(main(["--add", "es", "el umbral — the tripwire", "rf"], c, s => void out.push(s))).toBe(0);
+    expect(out[0]).toBe(`dupe: el umbral ×2 — restamped ${NOW}; tagged`);
+    expect(out[1]).toBe(`  have: es: el umbral — threshold | 2026-08-15 | subj: rf | seen: ${NOW}`);
+    expect(readFileSync(c.ledger, "utf8")).toBe(
+      `- es: el umbral — threshold | 2026-08-15 | subj: rf | seen: ${NOW}\n` +
+      "- es: la cota — bound (cf. el umbral) | 2026-08-16 | seen: 2026-09-02\n" +
+      `- es: el umbral — threshold (cruzar el umbral) | 2026-08-17 | ✓ | subj: rf | seen: ${NOW}\n`,
+    );
+  });
+
+  test("a repeat already stamped today still takes the subject, and says already", () => {
+    const c = fixture(`- es: la red — network | 2026-02-01 | seen: ${NOW}\n`);
+    const out: string[] = [];
+    expect(main(["--add", "es", "la red — network", "networking"], c, s => void out.push(s))).toBe(0);
+    expect(out[0]).toBe(`dupe: la red ×1 — already ${NOW}; tagged`);
+    expect(readFileSync(c.ledger, "utf8"))
+      .toBe(`- es: la red — network | 2026-02-01 | subj: networking | seen: ${NOW}\n`);
+  });
+
+  // --tag replaces a subject; a batch's one subject is coarser than a term's own.
+  // The tag sits on the middle copy, so first-copy-decides and last-copy-decides
+  // both fail.
+  test("a repeat never replaces a subject, and a tag on any copy counts", () => {
+    const seed =
+      "- es: el umbral — threshold | 2026-08-15 | seen: 2026-09-01\n" +
+      "- es: el umbral — limit | 2026-08-16 | subj: math | seen: 2026-09-02\n" +
+      "- es: el umbral — doorway | 2026-08-17 | seen: 2026-09-03\n";
+    const c = fixture(seed);
+    const out: string[] = [];
+    expect(main(["--add", "es", "el umbral — x", "rf"], c, s => void out.push(s))).toBe(0);
+    expect(out[0]).toBe(`dupe: el umbral ×3 — restamped ${NOW}; kept subj: math`);
+    expect(readFileSync(c.ledger, "utf8")).toBe(seed.replace(/seen: 2026-09-0\d/g, `seen: ${NOW}`));
+
+    const same: string[] = [];
+    main(["--add", "es", "el umbral — x", "math"], fixture(seed), s => void same.push(s));
+    expect(same[0]).toBe(`dupe: el umbral ×3 — restamped ${NOW}`);
+  });
 });
 
 describe("--add duplicate detection", () => {

@@ -127,7 +127,9 @@ existed: 69 duplicated terms and 168 redundant lines, `el umbral` seventeen time
 reported as new. A dupe is not refused, it is **restamped**: the session reached for the term,
 so it was surfaced, which is what `--seen` records. Every copy moves together and the `×N` says
 how many there are. The refusal it replaced cost three or four round trips per session
-(`--add`, read the existing line, `--seen`) to reach the same write. `exists:` remains for the
+(`--add`, read the existing line, `--seen`) to reach the same write. A subject passed with the
+repeat tags the term if no copy is tagged (`; tagged`), and never replaces one that is
+(`; kept subj: <subject>`); `--tag` is how a subject changes. `exists:` remains for the
 one case with nothing to restamp: the body is in the file, but under a different language or
 inside another term's gloss.
 
