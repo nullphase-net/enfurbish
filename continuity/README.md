@@ -16,7 +16,9 @@ Run at the end of a session. Produces three files:
 
 The final report ends with a `Worktree:` line: uncommitted paths anywhere in the repo, how many predate the session and how old the oldest is, and commits not yet pushed to the upstream. Nothing else in the plugin sees work older than the session, so it is the one place a pile left across several sessions shows up. When some of it predates the session, the handoff carries the same line. `/wrap` never commits; that stays your call.
 
-`/wrap -q` (or `--quick`) does only the local repo work — `NEXT_SESSION.md` and any CLAUDE.md routing. No retro, no journal entry. For a session whose value is a clean pointer rather than a retrospective.
+`/wrap -q` (or `--quick`) does only the local repo work — `NEXT_SESSION.md`, with any learnings listed in the final report. No retro, no journal entry. For a session whose value is a clean pointer rather than a retrospective.
+
+A learning that should change future sessions goes in the retro. It says what happened and the cheapest place a fix could live: the environment, a hook, a scoped rule, or, last, an always-on instruction. You make the change yourself. When a wrap drafts rules and you approve them, the model ends up writing the file, and the file only grows. `rationale.md` has the measurements.
 
 The skill is three files. `SKILL.md` is the spine every wrap loads; `full.md` holds the retro and journal steps and is read only on a full wrap, so `-q` never pays for it; `rationale.md` holds the measured evidence behind each rule and is read only when a rule looks wrong for the case at hand.
 
@@ -188,10 +190,6 @@ Scoped per cwd by design. A multi-package repo (`frontend/`, `api/`) can hold in
 | `~/.claude/tooling-journal.md` | every `/wrap` with a verdict to record (appended, atomic temp+rename) — never under `-q` | plugin |
 | `<cwd>/NEXT_SESSION.md` | every `/wrap`, unless all items resolved | plugin |
 | `~/.claude/state/continuity-firstfire/<session_id>` | first `SessionStart` fire of each session (re-fire suppression) | plugin |
-| `<cwd>/CLAUDE.md` or `~/.claude/CLAUDE.md` | only with explicit user confirmation | user |
-
-The plugin never modifies CLAUDE.md without asking. CLAUDE.md is user-authored, often committed to git, and durable — too important to mutate autonomously.
-
 ## Installation
 
 ```

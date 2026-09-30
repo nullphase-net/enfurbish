@@ -39,6 +39,7 @@ Fill from the session and the scan:
 ## Learnings
 - Claim, with the evidence/reasoning that supports it.
 - Focus on novel/unexpected. Skip restating known facts.
+- One that should change future sessions also names where its fix would live (SKILL.md step 6).
 
 ## Tooling assessment
 *Only user-modifiable tooling: installed skills, MCP servers, hooks, project-specific tools. Built-in Claude Code tools are not journaled. See step 4.*
@@ -52,7 +53,6 @@ Fill from the session and the scan:
 
 ## Handoff
 - NEXT_SESSION.md: written / preserved / removed (all resolved) / absent
-- CLAUDE.md: none / user-confirmed / project-confirmed
 ```
 
 Write it to `~/.claude/sessions/YYYY-MM-DD-<cwd-slug>-<sessionid8>.md` (`mkdir -p ~/.claude/sessions` if needed).
@@ -82,7 +82,7 @@ cat <<'JOURNAL' | bun run "<skill-base-dir>/../../lib/journal-append.ts" --journ
 JOURNAL
 ```
 
-`usage`, `notes`, `closed` and `action` are optional. One `closed` string may retire several rows of the same idea. The append prints what each close retired and flags any that retired nothing; a flagged one leaves its action open for the next wrap, so note it in the retro. Every `#id` in a `closed` string is retired, wherever it sits in the sentence, so an action you are keeping open goes in `notes`: a close that names an id and says it stays open is refused, and nothing is written. Omit `closed` on the wraps that retire nothing (most of them), and omit `action` when there genuinely isn't one rather than writing "none" (an action that says none is written as a note, and the append says so). Raw markdown on stdin still appends verbatim, for a retroactive or hand-written entry; JSON is the default because a format the model reassembles from memory drifts. Empty stdin is a no-op.
+`usage`, `notes`, `closed` and `action` are optional. One `closed` string may retire several rows of the same idea. A close says what happened to the tool itself: changed, reported upstream, or won't fix. The append prints what each close retired and flags any that retired nothing; a flagged one leaves its action open for the next wrap, so note it in the retro. Every `#id` in a `closed` string is retired, wherever it sits in the sentence, so an action you are keeping open goes in `notes`: a close that names an id and says it stays open is refused, and nothing is written. Omit `closed` on the wraps that retire nothing (most of them), and omit `action` when there genuinely isn't one rather than writing "none" (an action that says none is written as a note, and the append says so). Raw markdown on stdin still appends verbatim, for a retroactive or hand-written entry; JSON is the default because a format the model reassembles from memory drifts. Empty stdin is a no-op.
 
 **Verdict:** `helped` — output the session actually used. `hurt` — wasted time or tokens, produced wrong info, or required correction. `neutral` — ran without error and without observable signal either way.
 

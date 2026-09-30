@@ -18,6 +18,7 @@ The evidence behind the rules in `SKILL.md` and `full.md`, grouped by step. Noth
 ## Step 4: journal entry
 
 - **JSON in, rendered out.** The prose-owned format produced the 35 spellings above and 98 action lines the documented grep could not see. A format string in a prompt is reassembled from memory every session, and nothing catches a drifted field order.
+- **"Absorbed" is not a close.** 20 actions against other tools were closed as absorbed by the global `CLAUDE.md` (2026-09). Six of them became four global rules in one commit, and none of the tools changed.
 
 ## Step 5: NEXT_SESSION.md
 
@@ -38,6 +39,16 @@ The evidence behind the rules in `SKILL.md` and `full.md`, grouped by step. Noth
 - **A delegated open list.** Measured 2026-09-21 with dry-run agents on a handoff that named its store: five of five runs of the previous skill text already honoured the file's own section, so the paragraph is the contract written down, not a behaviour change. The line that changed behaviour is in `/next`, for the case with no file at all.
 
 - **Uncommitted work outlives sessions unseen.** `files_changed` keeps a dirty path only when its mtime falls inside the session, and `--since` filters the same way against the handoff header, so work left uncommitted across sessions reached no surface, and a user reported sessions piling it up. Measured 2026-09-26 over 25 local repos holding a handoff: 15 had uncommitted paths, 8 had some older than their own handoff (the oldest 191 days), and one branch sat 1007 commits ahead of its upstream. `worktree` is not time-bounded; `before_session` is the pile. The wrap reports it and does not commit: which paths belong in which commit is a judgment, and sessions end with nobody at the keyboard to make it.
+
+## Step 6: learnings
+
+Measured 2026-09-29 over one user's global `CLAUDE.md`: a month of sessions, 44 reconstructed versions, and controlled runs in isolated sandboxes.
+
+- **Learnings go to the retro, and the user makes the change.** 41 session edits in September. In 31 the model drafted a rule and the user accepted it, often an option the model had marked recommended. 27 of the 41 came from this step. Approval covered whether a rule went in, never what it said, and nothing ever left. The file grew from 51 lines to 268. 290 of the 332 added sentences appear verbatim in the model's own tool calls, and none in anything the user typed. A compaction the user asked for kept every rule and rewrote all of them in the model's voice.
+- **Record, don't draft.** Drafted text carries the model's form and vocabulary into the file, and back out again. The file's coined labels became the model's working vocabulary: a session that started with one of them in the file used it 28% of the time, against 2% without. A reply asked to "write a rule" copied the file's indentation, wrap width and evidence tag. What happened and what would have prevented it leaves the wording to the user.
+- **The ladder.** Prose against a habitual command shape was broken 83–96% of the time while it was loaded. A recipe for a deliberate task was broken 0.4–2% of the time. An environment fix took one failure class from 204 sessions in 25 days to 9 in the next 6, better than any rule. On 14 trap tasks × 2 runs, a session with no instruction file passed as often as one with the full file (96% both) at about half the cost. Those traps sit near the ceiling, so this shows the rules were not needed there, not that no rule helps.
+- **The retro, not the handoff.** Proposals the user did not accept rode forward in the handoff and came back at the next wrap. Nothing recorded a decline.
+- **Measured on this text** (2026-09-30, headless wraps in a sandbox, 5 per variant, same fixture: two learnings, one "the second project where this bit me", and the user away with blanket approval). The 0.15.0 step wrote the user-level file in 5 of 5 runs and the project file in 4. This step wrote nothing outside the retro, the journal and the handoff in 5 of 5, and every retro named a rung, a hook in each. The step names no file it does not write, and the result held. Without "it is not an open thread", 5 of 5 handoffs carried "decide on a hook" forward. With it, 2 of 5 did.
 
 ## Step 6: affirm
 

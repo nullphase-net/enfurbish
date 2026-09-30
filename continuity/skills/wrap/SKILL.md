@@ -1,6 +1,6 @@
 ---
 name: wrap
-description: Session-end retrospective. Writes a dated retro to ~/.claude/sessions/, appends to a cross-session tooling journal, and reconciles NEXT_SESSION.md so the next session can resume cleanly. Invoke as /wrap when ending a session, or /wrap -q for the local repo work only (NEXT_SESSION.md + CLAUDE.md, no retro or journal).
+description: Session-end retrospective. Writes a dated retro to ~/.claude/sessions/, appends to a cross-session tooling journal, and reconciles NEXT_SESSION.md so the next session can resume cleanly. Invoke as /wrap when ending a session, or /wrap -q for the local repo work only (NEXT_SESSION.md, no retro or journal).
 ---
 
 # `/wrap` — session-end retrospective
@@ -11,14 +11,13 @@ Run at the end of a session. It captures what was learned, evaluates how the use
 
 `/wrap` does everything. **Read `<skill-base-dir>/full.md` now**: it holds steps 2–4 (journal context, retro file, journal entry).
 
-`/wrap -q` (or `--quick`) runs steps 1, 5, 6 and 7 only: the `NEXT_SESSION.md` lifecycle and any CLAUDE.md routing, the work that stays inside the repo. Steps 2–4 are skipped and `full.md` is not read. Anything the procedure routes to the retro goes into the final report instead. Use it when the session's value is a clean pointer rather than a retrospective.
+`/wrap -q` (or `--quick`) runs steps 1, 5, 6 and 7 only: the `NEXT_SESSION.md` lifecycle and the learnings list, the work that stays inside the repo. Steps 2–4 are skipped and `full.md` is not read. Anything the procedure routes to the retro goes into the final report instead. Use it when the session's value is a clean pointer rather than a retrospective.
 
 ## What you produce
 
 1. Retro file at `~/.claude/sessions/YYYY-MM-DD-<cwd-slug>-<sessionid8>.md` *(full only)*
 2. Journal entry appended to `~/.claude/tooling-journal.md` via `journal-append.ts` *(full only)*
 3. `NEXT_SESSION.md` at the project root: written, left alone, or removed per step 5
-4. CLAUDE.md edits, user- or project-level, only with explicit user confirmation
 
 ## Procedure
 
@@ -128,15 +127,16 @@ On every other path leave `SUGGEST` empty. Note in the Handoff section which ite
 
 ### 6. Route learnings
 
-Pick the lowest-cost destination that closes the loop. Default to retro-only.
+A learning that should change what a future session does goes in the retro's Learnings (under `-q`, in the final report), and the user decides what to change. It is not an open thread: `NEXT_SESSION.md` carries this project's unfinished work. Write what happened and what would have prevented it. Name the cheapest place the fix could live, and stop at the first that closes the loop:
 
-| Destination | When | Confirm? |
-|---|---|---|
-| User CLAUDE.md (`~/.claude/CLAUDE.md`) | Cross-project rule that should load every session. High bar — permanent context cost. | **Yes** |
-| Project CLAUDE.md (`<cwd>/CLAUDE.md`) | Project-specific durable convention. Field-report-driven rules with rationale. | **Yes** |
-| Retro file only | One-off observation; ephemeral. | No |
+1. **The environment.** An install, alias, config or script change that makes the failure impossible.
+2. **A hook.** The mistake is a command or file shape a program can detect. Prose does not stop a habit.
+3. **A scoped rule.** It applies to one file type, tool, host or project, and something can see that condition.
+4. **An always-on instruction.** It applies to every session in every project. Name the existing instruction it would replace, or one that no longer earns its place.
 
-**Then re-check affirmation, whether or not this wrap wrote to CLAUDE.md.** If the `affirm` plugin is installed:
+Most sessions have none.
+
+**Then re-check affirmation.** If the `affirm` plugin is installed:
 
 ```
 /affirm --since <session_start>
@@ -151,16 +151,15 @@ Invoke the skill, not a path; affirm resolves its own lib. Files untouched insid
   Retro:          <path>
   Journal:        ~/.claude/tooling-journal.md (appended)
   NEXT_SESSION:   <written|preserved|removed|absent>
-  CLAUDE.md:      <none|user-confirmed|project-confirmed>
+  Learnings:      <none|N, in the retro>
   Affirm:         <clean|N changed, re-affirm|not installed>
   Worktree:       <worktree.summary from the scan, verbatim|not a repo>
 $SUGGEST
 ```
 
-Under `-q` drop the Retro and Journal lines, put the 5.7 note (carried, resolved, added) on a `Handoff:` line after `NEXT_SESSION:`, since there is no retro to hold it, and head it `/wrap -q complete (local only):`. An empty `$SUGGEST` collapses; no trailing blank lines.
+Under `-q` drop the Retro and Journal lines, put the 5.7 note (carried, resolved, added) on a `Handoff:` line after `NEXT_SESSION:`, since there is no retro to hold it, list any learnings after the block, and head it `/wrap -q complete (local only):`. An empty `$SUGGEST` collapses; no trailing blank lines.
 
 ## Policy
 
-- Only CLAUDE.md edits need explicit confirmation: user-authored, often committed, durable. The retro, the journal entry and `NEXT_SESSION.md` are written autonomously. Otherwise ask only on genuine ambiguity.
+- The wrap writes the retro, the journal entry and `NEXT_SESSION.md`, autonomously, and changes nothing else. Ask only on genuine ambiguity.
 - Best-effort. `scan.ts` failing → self-reported stats and "stats unavailable" in the journal entry. One failed write does not block the rest.
-- Out of scope: commits and every other git operation, working-tree cleanup, `.gitignore` management for `NEXT_SESSION.md`, any memory system beyond the retro, the journal and `NEXT_SESSION.md`.
