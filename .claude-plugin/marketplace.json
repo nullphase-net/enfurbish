@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "continuity",
-      "source": { "source": "git-subdir", "url": "nullphase-net/enfurbish", "path": "continuity", "ref": "continuity-v0.16.1" },
+      "source": { "source": "git-subdir", "url": "nullphase-net/enfurbish", "path": "continuity", "ref": "continuity-v0.16.2" },
       "description": "Intentional session continuity: /wrap retro, /next command, and a SessionStart hook that surfaces NEXT_SESSION.md handoffs.",
       "author": { "name": "phreakocious" },
       "category": "workflow",
