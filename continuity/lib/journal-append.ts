@@ -245,6 +245,9 @@ function row(a: Action, withId = true, full = false): string {
  */
 const STALE_ROWS = 5;
 
+/** The closed block's ceiling, the default --limit: a higher --limit is for open rows. */
+const CLOSED_ROWS = 20;
+
 // The block with a job attached. It sits under the rows it is about, and only when
 // there are rows: an instruction the skill carried on every wrap did nothing for
 // months, because retiring an action had no write behind it.
@@ -276,10 +279,11 @@ export function reportActions(secs: Section[], tool: string | undefined, limit: 
     ? acts.slice(Math.max(recent.length, acts.length - STALE_ROWS))
     : [];
   const hidden = acts.length - recent.length - stale.length;
-  // Closed first, so a reader meets what was retired before logging it again. Capped
-  // like the head: uncapped was right at 20 closes, but retiring the backlog on
-  // 2026-09-24 took 24 more (naming 134 ids), and every wrap would print all 44.
-  const shownDone = done.slice(0, limit);
+  // Closed first, so a reader meets what was retired before logging it again. Capped:
+  // uncapped was right at 20 closes, but retiring the backlog on 2026-09-24 took 24
+  // more (naming 134 ids), and every wrap would print all 44. Capped at --limit too
+  // until 2026-09-30, when seeing all 53 open rows meant printing 100 closed ones.
+  const shownDone = done.slice(0, Math.min(limit, CLOSED_ROWS));
   return [
     head,
     ...(done.length ? [
@@ -371,7 +375,8 @@ const USAGE = `usage: journal-append.ts --journal <path> [mode]
                                    what to do about them; <name> (or --tool <name>)
                                    filters to one tool, --full prints whole text
        --recent <name>             what prior wraps said about one tool
-       --limit <n>                 cap rows (default 20 actions / 5 sections)`;
+       --limit <n>                 cap rows (default 20 actions / 5 sections;
+                                   closed rows stop at 20 whatever <n> is)`;
 
 if (import.meta.main) {
   const args = parseArgs(process.argv.slice(2));

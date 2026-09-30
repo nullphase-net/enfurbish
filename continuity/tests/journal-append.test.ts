@@ -249,6 +249,19 @@ test("the closed block is capped at --limit, with the overflow counted", () => {
   expect(r.stdout).toContain("+1 older closed");
 });
 
+// Raising --limit to see every open row raised the closed block with it: 53 open
+// rows cost 100 closed rows printed ahead of them (2026-09-30).
+test("a --limit above 20 raises the open rows, not the closed block", () => {
+  const j = manyActions();
+  for (let i = 1; i <= 21; i++) closeWith(j, `retirement ${String(i).padStart(2, "0")}`);
+  const r = cli(j, "--actions", "--limit", "100");
+  expect(r.stdout).toContain("retirement 21");
+  expect(r.stdout).toContain("retirement 02");
+  expect(r.stdout).not.toContain("retirement 01");
+  expect(r.stdout).toContain("+1 older closed");
+  expect(openRows(r.stdout).length).toBe(3);
+});
+
 // The wrap writes closes through formatEntry, not by hand: a second producer of
 // the same line, so it gets its own case.
 const entry = (closed?: string[]) => JSON.stringify({
