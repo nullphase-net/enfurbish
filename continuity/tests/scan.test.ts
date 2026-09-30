@@ -452,6 +452,18 @@ test("files_edited_blind stays absent when files_edited covers everything git sa
   expect(r.files_edited_blind).toBeUndefined();
 });
 
+test("the scan reports re-dated paths as files_changed_predated, and omits the field when there are none", async () => {
+  const root = repoRedated("2026-08-18T16:00:00-05:00", "2026-08-18T18:45:00-05:00");
+  const r = await parseTranscript(mixedSession(root, []));
+  expect(r.files_changed).toEqual(["old.txt"]);
+  expect(r.files_changed_predated).toEqual(["old.txt"]);
+
+  const plain = repoAt("2026-08-18T18:45:00-05:00");
+  const p = await parseTranscript(mixedSession(plain, []));
+  expect(p.files_changed).toEqual(["committed.txt"]);
+  expect(p.files_changed_predated).toBeUndefined();
+});
+
 test("files_edited_blind is absent when the session ran no Bash at all", async () => {
   const r = await parseTranscript(writeSession([userRec("just a question")]));
   expect(r.files_edited_blind).toBeUndefined();
@@ -479,14 +491,80 @@ test("gitChangedSince finds committed and still-dirty files both", () => {
   const root = repoAt("2026-08-18T18:00:00-05:00");
   writeFileSync(join(root, "untracked.txt"), "y");
   writeFileSync(join(root, "committed.txt"), "modified");
-  const got = gitChangedSince(root, "2026-08-18T17:00:00-05:00");
+  const got = gitChangedSince(root, "2026-08-18T17:00:00-05:00")?.files;
   expect(got).toEqual(["committed.txt", "untracked.txt"]);
+});
+
+// `git log --since` reads the COMMIT date, so a rebase or amend re-dates old work
+// into the window. Measured 2026-09-26: an autosquash rebase put 14 of 20
+// files_changed paths into a session that changed one test fixture. The paths stay
+// (the repo did change) and are flagged, because /wrap reads the list as evidence.
+// The stimulus is a real `--amend`, which keeps the author date and moves the
+// commit date, as a rebase does.
+function repoRedated(authorIso: string, committerIso: string): string {
+  const root = mkdtempSync(join(tmpdir(), "scan-git-"));
+  const fx = gitInitClean(root);
+  try {
+    writeFileSync(join(root, "old.txt"), "x");
+    spawnSync("git", ["add", "-A"], { cwd: root });
+    spawnSync("git", ["commit", "-q", "-m", "c"], {
+      cwd: root, env: { ...process.env, GIT_COMMITTER_DATE: authorIso, GIT_AUTHOR_DATE: authorIso },
+    });
+    spawnSync("git", ["commit", "-q", "--amend", "--no-edit"], {
+      cwd: root, env: { ...process.env, GIT_COMMITTER_DATE: committerIso },
+    });
+  } finally {
+    fx.cleanup();
+  }
+  return root;
+}
+
+function commitAt(root: string, file: string, iso: string) {
+  const fx = gitInitClean(mkdtempSync(join(tmpdir(), "scan-home-")));
+  try {
+    writeFileSync(join(root, file), iso);
+    spawnSync("git", ["add", "-A"], { cwd: root });
+    spawnSync("git", ["commit", "-q", "-m", file], {
+      cwd: root, env: { ...process.env, GIT_COMMITTER_DATE: iso, GIT_AUTHOR_DATE: iso },
+    });
+  } finally {
+    fx.cleanup();
+  }
+}
+
+test("gitChangedSince flags a path whose only commit in the window was authored before it", () => {
+  const root = repoRedated("2026-08-18T16:00:00-05:00", "2026-08-18T18:00:00-05:00");
+  commitAt(root, "own.txt", "2026-08-18T18:30:00-05:00");
+  const got = gitChangedSince(root, "2026-08-18T17:00:00-05:00")!;
+  expect(got.files).toEqual(["old.txt", "own.txt"]);
+  expect(got.predated).toEqual(["old.txt"]);
+});
+
+// The other direction, both ways a re-dated path can still be the session's work:
+// a commit authored in the window touched it too, or it is dirty in the window.
+test("gitChangedSince does not flag a re-dated path the window also committed or edited", () => {
+  const root = repoRedated("2026-08-18T16:00:00-05:00", "2026-08-18T18:00:00-05:00");
+  writeFileSync(join(root, "second.txt"), "y");
+  commitAt(root, "old.txt", "2026-08-18T18:30:00-05:00");
+  const both = gitChangedSince(root, "2026-08-18T17:00:00-05:00")!;
+  expect(both.files).toContain("old.txt");
+  expect(both.predated).toEqual([]);
+
+  const dirty = repoRedated("2026-08-18T16:00:00-05:00", "2026-08-18T18:00:00-05:00");
+  writeFileSync(join(dirty, "old.txt"), "edited in the window");
+  expect(gitChangedSince(dirty, "2026-08-18T17:00:00-05:00")!.predated).toEqual([]);
+});
+
+test("gitChangedSince flags nothing when every commit was authored in the window", () => {
+  const got = gitChangedSince(repoAt("2026-08-18T18:00:00-05:00"), "2026-08-18T17:00:00-05:00")!;
+  expect(got.files).toEqual(["committed.txt"]);
+  expect(got.predated).toEqual([]);
 });
 
 // The other direction: a quiet repo must return an empty list, not a stale one.
 test("gitChangedSince returns [] when nothing changed in the window", () => {
   const root = repoAt("2026-08-18T18:00:00-05:00");
-  expect(gitChangedSince(root, "2026-08-18T19:00:00-05:00")).toEqual([]);
+  expect(gitChangedSince(root, "2026-08-18T19:00:00-05:00")?.files).toEqual([]);
 });
 
 // `git status` is not time-bounded: without a filter it reports every dirty file,
@@ -501,7 +579,7 @@ test("gitChangedSince excludes dirty files that predate the window", () => {
   utimesSync(stale, old, old);
 
   writeFileSync(join(root, "this-session.txt"), "now");
-  const got = gitChangedSince(root, "2026-08-18T17:00:00-05:00")!;
+  const got = gitChangedSince(root, "2026-08-18T17:00:00-05:00")!.files;
   expect(got).toContain("this-session.txt");
   expect(got).not.toContain("left-over.txt");
 });
@@ -512,7 +590,7 @@ test("gitChangedSince keeps in-window edits and un-stattable deletions", () => {
   const root = repoAt("2026-08-18T18:00:00-05:00");
   rmSync(join(root, "committed.txt"));
   writeFileSync(join(root, "fresh.txt"), "y");
-  const got = gitChangedSince(root, "2026-08-18T17:00:00-05:00")!;
+  const got = gitChangedSince(root, "2026-08-18T17:00:00-05:00")!.files;
   expect(got).toContain("committed.txt");
   expect(got).toContain("fresh.txt");
 });
@@ -535,7 +613,7 @@ test("gitChangedSince does not report the cwd's own NEXT_SESSION.md as session w
   writeFileSync(join(root, "NEXT_SESSION.md"), "# Next session — proj\n");
   writeFileSync(join(root, "real.txt"), "session work");
   writeFileSync(join(root, "sub", "NEXT_SESSION.md"), "# Next session — sub\n");
-  const got = gitChangedSince(root, "2026-08-18T19:00:00-05:00");
+  const got = gitChangedSince(root, "2026-08-18T19:00:00-05:00")?.files;
   expect(got).toEqual(["real.txt", "sub/NEXT_SESSION.md"]);
 });
 
@@ -562,7 +640,7 @@ test("gitChangedSince from a subdirectory still excludes dirty files that predat
   const old = new Date("2026-08-18T12:00:00-05:00");
   utimesSync(stale, old, old);
   writeFileSync(join(root, "sub", "fresh.txt"), "now");
-  const got = gitChangedSince(join(root, "sub"), "2026-08-18T19:00:00-05:00")!;
+  const got = gitChangedSince(join(root, "sub"), "2026-08-18T19:00:00-05:00")!.files;
   expect(got).toContain("sub/fresh.txt");
   expect(got).not.toContain("left-over.txt");
 });
@@ -571,7 +649,7 @@ test("gitChangedSince from a subdirectory drops its own pointer and keeps the ro
   const root = repoWithSub();
   writeFileSync(join(root, "NEXT_SESSION.md"), "# Next session — root\n");
   writeFileSync(join(root, "sub", "NEXT_SESSION.md"), "# Next session — sub\n");
-  const got = gitChangedSince(join(root, "sub"), "2026-08-18T19:00:00-05:00");
+  const got = gitChangedSince(join(root, "sub"), "2026-08-18T19:00:00-05:00")?.files;
   expect(got).toEqual(["NEXT_SESSION.md"]);
 });
 
@@ -600,7 +678,7 @@ test("gitChangedSince returns every changed file, uncapped", () => {
   for (let i = 0; i < FILES_CHANGED_CAP + 5; i++) {
     writeFileSync(join(root, `f${String(i).padStart(3, "0")}.txt`), "x");
   }
-  expect(gitChangedSince(root, "2026-08-18T17:00:00-05:00")!.length)
+  expect(gitChangedSince(root, "2026-08-18T17:00:00-05:00")!.files.length)
     .toBe(FILES_CHANGED_CAP + 5 + 1); // +1 for committed.txt
 });
 

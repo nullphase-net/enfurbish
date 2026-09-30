@@ -141,6 +141,7 @@ The retro and journal entry are informed by `scan.ts`, which parses the current 
 - Skills invoked — both `Skill` tool calls and slash commands typed by the user, so built-in commands (`/clear`, `/compact`) appear here too
 - Files edited (most-recent first, capped at 50), from Edit/Write records only
 - `files_changed`: what git says moved in the repo since the session started, commits plus dirty files modified inside the window. It catches the writes `files_edited` cannot see (heredocs, patch scripts, `cp`), and it is repo-scoped, not session-scoped.
+- `files_changed_predated`: the `files_changed` paths whose only commits in the window were authored before it and that are not dirty in it. `git log --since` reads the commit date, which a rebase, amend or cherry-pick resets, so older work lands in the window; these paths stay listed but are flagged. Absent when there are none. `handoffs.ts --since` marks such commits the same way, `(authored before the header)`.
 - `worktree`: uncommitted and unpushed work in the repo, not bounded by time. `summary` is the final report's `Worktree:` line; `before_session` counts uncommitted paths older than the session.
 - Number of files read
 

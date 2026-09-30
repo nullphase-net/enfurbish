@@ -408,7 +408,10 @@ export function windowSince(root: string, path: string, limit = 25): string {
 
   const git = (...a: string[]) =>
     spawnSync("git", ["-C", root, ...a], { encoding: "utf8", maxBuffer: 8 << 20 });
-  const log = git("log", "--pretty=%h  %s", `--since=${iso}`);
+  // `--since` reads the commit date; a rebase or amend moves it and keeps the author
+  // date. Such commits did land, so they stay, marked: a 2026-09-26 rebase counted two
+  // commits authored 3 minutes before the header as landing after it.
+  const log = git("log", "--pretty=%at %h  %s", `--since=${iso}`);
   if (log.status !== 0) {
     // `git log` also exits non-zero on a repo that has no commits yet. Same class of
     // answer — the window is unknown either way — but the reason is a different fact
@@ -448,7 +451,13 @@ export function windowSince(root: string, path: string, limit = 25): string {
   }).length;
   const dirtyNote = dirty === null ? " · uncommitted unknown" : dirty ? ` · ${dirty} uncommitted` : "";
 
-  const commits = log.stdout.split("\n").filter(l => l.trim());
+  let before = 0;
+  const commits = log.stdout.split("\n").filter(l => l.trim()).map(l => {
+    const [at, ...rest] = l.split(" ");
+    if (Number(at) * 1000 >= cutoff) return rest.join(" ");
+    before++;
+    return `${rest.join(" ")}  (authored before the header)`;
+  });
   if (commits.length === 0) {
     const verdict = dirty === null ? "git status failed, so whether it still describes the tree is unknown"
       : dirty ? "handoff predates uncommitted work" : "handoff still describes HEAD";
@@ -473,7 +482,7 @@ export function windowSince(root: string, path: string, limit = 25): string {
 
   const shown = commits.slice(0, limit);
   const out = [
-    `${plural(commits.length)} · ${files === null ? "files unknown" : `${files.length} file${files.length === 1 ? "" : "s"}`}${dirtyNote} since ${iso}`,
+    `${plural(commits.length)}${before ? ` (${before} authored before the header)` : ""} · ${files === null ? "files unknown" : `${files.length} file${files.length === 1 ? "" : "s"}`}${dirtyNote} since ${iso}`,
     ...edit,
     ...shown.map(c => `  ${c}`),
     ...(commits.length > shown.length ? [`  +${commits.length - shown.length} older`] : []),

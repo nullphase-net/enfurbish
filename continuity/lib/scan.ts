@@ -133,6 +133,14 @@ export type ScanOk = {
   /** How many `files_changed` entries the cap dropped. Absent when it dropped none. */
   files_changed_hidden?: number;
   /**
+   * The `files_changed` paths whose only commits in the window were authored before
+   * it (a rebase, amend or cherry-pick re-dated them) and which are not dirty in it.
+   * Not evidence that this session moved them. Absent when there are none.
+   */
+  files_changed_predated?: string[];
+  /** How many `files_changed_predated` entries the cap dropped. */
+  files_changed_predated_hidden?: number;
+  /**
    * What the repo holds that no commit does, repo-wide and not time-bounded. See
    * `worktreeState`. Absent when `cwd` is not in a repo.
    */
@@ -181,16 +189,26 @@ export const FILES_CHANGED_CAP = 50;
  * output and dependency dirs touched in the window. The instruction files are the
  * ones that matter, and /wrap already asks `affirm --since` about exactly those.
  *
+ * RE-DATED COMMITS ARE FLAGGED, NOT DROPPED. `git log --since` reads the commit date,
+ * and a rebase, amend or cherry-pick sets that to now while keeping the author date.
+ * Measured 2026-09-26: an autosquash rebase of two unpushed commits (authored 16:07,
+ * re-committed 19:09, session start 19:08) put 14 of 20 paths into a session that
+ * changed one 6-line fixture in them. `predated` names the paths whose only commits in
+ * the window were authored before it and that are not dirty in it either. They stay
+ * in `files`: the repo did change, and an amend of an older commit can carry this
+ * session's work. Filtering on author date instead would hide that case silently.
+ *
  * null means git could not answer. That is not the same fact as an empty list.
  * The full list comes back uncapped; the caller caps it, because a cap that discards
  * the count of what it discarded is the silent-truncation this repo bans.
  */
-export function gitChangedSince(cwd: string, iso: string): string[] | null {
+export function gitChangedSince(cwd: string, iso: string): { files: string[]; predated: string[] } | null {
   if (!cwd || !(Date.parse(iso) > 0)) return null;
   const git = (...args: string[]) =>
     spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", maxBuffer: 8 << 20 });
 
-  const log = git("log", "--name-only", "--pretty=format:", `--since=${iso}`);
+  // Each commit opens with \x01 and its author time, then its paths.
+  const log = git("log", "--name-only", "--pretty=format:%x01%at", `--since=${iso}`);
   if (log.status !== 0) return null;
   // Both lists below are relative to the repo ROOT whatever `-C` says, and the cwd can
   // be a subdirectory of it. Joined to the cwd instead, every stat from a subdirectory
@@ -205,12 +223,17 @@ export function gitChangedSince(cwd: string, iso: string): string[] | null {
   // commits-only list reads as complete, so a failed status is "could not answer".
   if (dirty.status !== 0) return null;
 
-  const seen = new Set<string>();
-  for (const f of log.stdout.split("\n")) {
-    const t = f.trim();
-    if (t) seen.add(t);
-  }
   const cutoff = Date.parse(iso);
+  const seen = new Set<string>();
+  const authoredIn = new Set<string>();
+  for (const commit of log.stdout.split("\x01")) {
+    const [at, ...paths] = commit.split("\n").map(l => l.trim());
+    for (const f of paths.filter(Boolean)) {
+      seen.add(f);
+      if (Number(at) * 1000 >= cutoff) authoredIn.add(f);
+    }
+  }
+  const committed = [...seen];
   // A rename emits two NUL fields: `R  <dest>` then a bare `<src>` with no status
   // bytes. Rather than track which field is which, take a path off either shape ---
   // the source of a rename did change, so keeping it is right, not a leak.
@@ -218,14 +241,17 @@ export function gitChangedSince(cwd: string, iso: string): string[] | null {
     if (!rec) continue;
     const rel = /^[ MADRCU?!]{2} /.test(rec) ? rec.slice(3) : rec;
     let m: number;
-    try { m = statSync(join(loc.top, rel)).mtimeMs; } catch { seen.add(rel); continue; }
-    if (m > cutoff) seen.add(rel);
+    try { m = statSync(join(loc.top, rel)).mtimeMs; } catch { seen.add(rel); authoredIn.add(rel); continue; }
+    if (m > cutoff) { seen.add(rel); authoredIn.add(rel); }
   }
   // The wrap writes this cwd's pointer inside the session window, so it always
   // qualified and reported the scan's own artifact as session work. A pointer in any
   // other directory belongs to another cwd's wrap and stays.
   seen.delete(`${loc.prefix}NEXT_SESSION.md`);
-  return [...seen].sort();
+  return {
+    files: [...seen].sort(),
+    predated: committed.filter(f => seen.has(f) && !authoredIn.has(f)).sort(),
+  };
 }
 
 export type Worktree = {
@@ -486,7 +512,9 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
   // Whenever Bash ran, not only when files_edited came back empty: one Edit call
   // beside twenty heredoc writes yields a non-empty list that is still not the story.
   const bash = (tools.Bash?.calls ?? 0) > 0;
-  const gitChanged = bash ? gitChangedSince(cwd, firstTs!) : null;
+  const changed = bash ? gitChangedSince(cwd, firstTs!) : null;
+  const gitChanged = changed?.files ?? null;
+  const predated = changed?.predated ?? [];
   const top = gitChanged?.length ? repoLocation(cwd)?.top : undefined;
   // Against every edit, not the capped list: a 51st edit is still an edit.
   const blind = bash && (files_edited.length === 0
@@ -515,6 +543,10 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
     ...(gitChanged ? { files_changed: gitChanged.slice(0, FILES_CHANGED_CAP) } : {}),
     ...(gitChanged && gitChanged.length > FILES_CHANGED_CAP
       ? { files_changed_hidden: gitChanged.length - FILES_CHANGED_CAP }
+      : {}),
+    ...(predated.length ? { files_changed_predated: predated.slice(0, FILES_CHANGED_CAP) } : {}),
+    ...(predated.length > FILES_CHANGED_CAP
+      ? { files_changed_predated_hidden: predated.length - FILES_CHANGED_CAP }
       : {}),
     files_read_count: filesRead.size,
     ...(worktree ? { worktree } : {}),

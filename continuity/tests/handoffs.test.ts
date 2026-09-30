@@ -443,6 +443,34 @@ test("windowSince names the commits and files that landed after the header", () 
   expect(out).toContain("2026-08-18T19:00:00-05:00");
   expect(out).not.toContain("2026-08-18T16:00:00-05:00");
   expect(out).toContain("files: f.txt");
+  expect(out).not.toContain("authored before");
+});
+
+// `--since` reads the commit date, so a rebase counted two commits as "landed after"
+// a header written 3 minutes after they were authored (2026-09-26). They stay in the
+// window, because they did land, and are marked. The stimulus is a real `--amend`,
+// which keeps the author date and moves the commit date, as a rebase does.
+test("windowSince marks commits authored before the header, and counts them in the head", () => {
+  const root = repoWithCommits(["2026-08-18T16:00:00-05:00"]);
+  const fx = gitInitClean(mkdtempSync(join(tmpdir(), "handoffs-home-")));
+  try {
+    spawnSync("git", ["commit", "-q", "--amend", "--no-edit"], {
+      cwd: root, env: { ...process.env, GIT_COMMITTER_DATE: "2026-08-18T18:00:00-05:00" },
+    });
+    writeFileSync(join(root, "g.txt"), "own");
+    spawnSync("git", ["add", "-A"], { cwd: root });
+    spawnSync("git", ["commit", "-q", "-m", "own work"], {
+      cwd: root, env: { ...process.env, GIT_COMMITTER_DATE: "2026-08-18T18:30:00-05:00", GIT_AUTHOR_DATE: "2026-08-18T18:30:00-05:00" },
+    });
+  } finally {
+    fx.cleanup();
+  }
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, HANDOFF("2026-08-18T17:00:00-05:00"));
+  const lines = windowSince(root, p).split("\n");
+  expect(lines[0]).toStartWith("2 commits (1 authored before the header)");
+  expect(lines.find(l => l.includes("2026-08-18T16:00:00-05:00"))).toContain("authored before the header");
+  expect(lines.find(l => l.includes("own work"))).not.toContain("authored before");
 });
 
 // A hand reconcile that skipped --header leaves the file newer than its header, and
