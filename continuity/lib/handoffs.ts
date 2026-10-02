@@ -308,6 +308,27 @@ export function commitsSince(root: string, iso: string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * When HEAD sits behind the default branch, that branch's commits count nowhere:
+ * `commitsSince` and `windowSince` read HEAD. A worktree flow commits on main from a
+ * sibling checkout, so a pointer describing main was judged against a branch 6
+ * commits behind it and read as current (2026-09-28). "" when HEAD is not behind
+ * it (on it, or ahead), or git cannot tell. The default branch is the one
+ * origin/HEAD names, else a local main, else master.
+ */
+export function headLag(root: string): string {
+  const git = (...a: string[]) => spawnSync("git", ["-C", root, ...a], { encoding: "utf8", timeout: 2000 });
+  const head = git("rev-parse", "--abbrev-ref", "HEAD");
+  if (head.status !== 0) return "";
+  const origin = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD").stdout?.trim().replace(/^origin\//, "");
+  const base = [origin, "main", "master"].find(b => b && git("rev-parse", "--verify", "-q", `refs/heads/${b}`).status === 0);
+  if (!base) return "";
+  const n = Number.parseInt(git("rev-list", "--count", `HEAD..${base}`).stdout ?? "", 10);
+  const name = head.stdout.trim();
+  const label = name === "HEAD" ? "detached HEAD" : `HEAD ${name}`;
+  return n > 0 ? `${label} is ${plural(n)} behind ${base}; its commits are not counted` : "";
+}
+
 export function collect(
   sessionCwd: string,
   projectRoot: string,
@@ -341,7 +362,7 @@ const plural = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
  * cwd-local pointer is not the newest one, say so and say by how much, because
  * that is the exact condition under which reading only the local file is wrong.
  */
-export function report(hs: Handoff[], projectRoot: string, now: number, cut = 0): string {
+export function report(hs: Handoff[], projectRoot: string, now: number, cut = 0, lag = ""): string {
   // A cut walk's "0 handoffs" and "newest" both describe only what it reached.
   const scan = cut ? ` · scan cut at its time budget: ${cut} dir${cut === 1 ? "" : "s"} unsearched` : "";
   const head = `${hs.length} handoff${hs.length === 1 ? "" : "s"} · root ${projectRoot}${scan}`;
@@ -378,7 +399,7 @@ export function report(hs: Handoff[], projectRoot: string, now: number, cut = 0)
     const big = h.size > OVERSIZE ? `  oversize:${Math.round(h.size / 1024)}KB` : "";
     return `${h === newest ? "*" : " "} ${name}  ${age} wrapped ${wrapped}${own}${drift}${since}${big}`;
   });
-  return [head + pivot + behind, ...lines].join("\n");
+  return [head + pivot + behind + (lag ? ` · ${lag}` : ""), ...lines].join("\n");
 }
 
 /**
@@ -424,6 +445,8 @@ export function windowSince(root: string, path: string, limit = 25): string {
       : `git log failed: ${err.trim().split("\n")[0] || `exit ${log.status}`}`;
     return `${why} — window unknown`;
   }
+  const lag = headLag(root);
+  const lagNote = lag ? ` · ${lag}` : "";
 
   // Uncommitted work counts. A session that ended without a wrap is as likely to
   // have left the tree dirty as to have committed, and this repo demonstrated it:
@@ -461,7 +484,7 @@ export function windowSince(root: string, path: string, limit = 25): string {
   if (commits.length === 0) {
     const verdict = dirty === null ? "git status failed, so whether it still describes the tree is unknown"
       : dirty ? "handoff predates uncommitted work" : "handoff still describes HEAD";
-    return `0 commits since ${iso}${dirtyNote} — ${verdict}`;
+    return `0 commits since ${iso}${dirtyNote} — ${verdict}${lagNote}`;
   }
 
   const names = git("log", "--name-only", "--pretty=format:", `--since=${iso}`);
@@ -482,7 +505,7 @@ export function windowSince(root: string, path: string, limit = 25): string {
 
   const shown = commits.slice(0, limit);
   const out = [
-    `${plural(commits.length)}${before ? ` (${before} authored before the header)` : ""} · ${files === null ? "files unknown" : `${files.length} file${files.length === 1 ? "" : "s"}`}${dirtyNote} since ${iso}`,
+    `${plural(commits.length)}${before ? ` (${before} authored before the header)` : ""} · ${files === null ? "files unknown" : `${files.length} file${files.length === 1 ? "" : "s"}`}${dirtyNote} since ${iso}${lagNote}`,
     ...edit,
     ...shown.map(c => `  ${c}`),
     ...(commits.length > shown.length ? [`  +${commits.length - shown.length} older`] : []),
@@ -655,7 +678,8 @@ export function main(
   const cwd = (flag === "--cwd" && args[1]) || process.cwd();
   const root = findProjectRoot(cwd);
   const { files, cut } = scanForNextSessionsWithStats(root);
-  emit(report(collect(cwd, root, files), root, now, cut));
+  const hs = collect(cwd, root, files);
+  emit(report(hs, root, now, cut, hs.length ? headLag(root) : ""));
   return 0;
 }
 

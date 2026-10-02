@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { FILES_CHANGED_CAP, encodeCwd, findTranscript, gitChangedSince, parseTranscript, worktreeState } from "../lib/scan";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync, realpathSync, utimesSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { gitInitClean } from "./helpers/git";
 
@@ -140,6 +140,33 @@ test("parseTranscript records hooks", async () => {
   const r = await parseTranscript(FIXTURE);
   expect(r.hooks.SessionStart?.fired).toBe(1);
   expect(r.hooks.Stop?.fired).toBe(1);
+});
+
+// `fired` counted every attachment, so one startup of 6 hooks with 2 banners and
+// 1 context block read 9. And a PreToolUse hook that allows a call leaves no
+// record at all: measured 2026-09-30, fired=1 against 2 denials in 96 guarded calls.
+test("parseTranscript counts one record per hook run, and denials apart", async () => {
+  const att = (type: string, hookEvent: string) => JSON.stringify({
+    type: "attachment", attachment: { type, hookEvent }, timestamp: "2026-08-18T00:00:00.000Z",
+    sessionId: "77777777-0000-0000-0000-000000000000",
+  });
+  const call = (id: string, content: unknown, is_error = true) => [
+    JSON.stringify({
+      type: "assistant", cwd: "/repo", timestamp: "2026-08-18T00:00:00.000Z",
+      message: { role: "assistant", content: [{ type: "tool_use", id, name: "Bash", input: {} }] },
+    }),
+    userRec([{ type: "tool_result", tool_use_id: id, is_error, content }]),
+  ];
+  const r = await parseTranscript(writeSession([
+    att("hook_success", "SessionStart"), att("hook_success", "SessionStart"),
+    att("hook_system_message", "SessionStart"), att("hook_additional_context", "SessionStart"),
+    ...call("t1", "PreToolUse:Bash hook error: grep -r skips symlinked dirs."),
+    ...call("t2", [{ type: "text", text: "PreToolUse:Bash hook error: a pipeline's exit status" }]),
+    ...call("t3", "Exit code 1\nPreToolUse:Bash hook error: quoted in a failing command's output"),
+    ...call("t4", "PreToolUse:Bash hook error: printed by a command that succeeded", false),
+  ]));
+  expect(r.hooks.SessionStart).toEqual({ fired: 2 });
+  expect(r.hooks.PreToolUse).toEqual({ fired: 0, denied: 2 });
 });
 
 test("parseTranscript captures skills_invoked", async () => {
@@ -531,6 +558,24 @@ function commitAt(root: string, file: string, iso: string) {
     fx.cleanup();
   }
 }
+
+// A worktree flow commits from a sibling checkout of the same repo, and the scan read
+// only the cwd's tree: a session that committed in ../<repo>-main read
+// files_changed: [] from the primary checkout (journal, 2026-10-01). The sibling's
+// paths come back relative to this repo's root, so each one names a real file.
+test("gitChangedSince adds work done in a sibling worktree, once, under its path", () => {
+  const root = realpathSync(repoAt("2026-08-18T18:00:00-05:00"));
+  const sib = `${root}-sib`;
+  spawnSync("git", ["worktree", "add", "-q", "-b", "feature", sib], { cwd: root });
+  commitAt(sib, "sib.txt", "2026-08-18T18:30:00-05:00");
+  writeFileSync(join(sib, "dirty.txt"), "y");
+  const rel = `../${basename(sib)}`;
+  // committed.txt is in the window on both branches: listed once, as the cwd's own.
+  expect(gitChangedSince(root, "2026-08-18T17:00:00-05:00")!.files)
+    .toEqual([`${rel}/dirty.txt`, `${rel}/sib.txt`, "committed.txt"]);
+  rmSync(sib, { recursive: true });   // a worktree whose directory is gone has nothing to report
+  expect(gitChangedSince(root, "2026-08-18T17:00:00-05:00")!.files).toEqual(["committed.txt"]);
+});
 
 test("gitChangedSince flags a path whose only commit in the window was authored before it", () => {
   const root = repoRedated("2026-08-18T16:00:00-05:00", "2026-08-18T18:00:00-05:00");

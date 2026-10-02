@@ -428,6 +428,29 @@ test("report stays silent about commits when the handoff is current", () => {
   expect(out).not.toContain("commit");
 });
 
+// Both counts read HEAD. A worktree flow commits on main from a sibling checkout,
+// so a pointer describing main was judged against a branch 6 commits behind it
+// (2026-09-28) and read as current.
+test("--cwd and --since say when HEAD is behind main, and stay silent on main", () => {
+  const root = repoWithCommits(COMMITS);
+  writeFileSync(join(root, "NEXT_SESSION.md"), HANDOFF("2026-08-18T17:00:00-05:00"));
+  const run = (...args: string[]) => {
+    let out = "";
+    main(args, Date.parse("2026-08-18T21:00:00-05:00"), s => { out = s; });
+    return out.split("\n")[0];
+  };
+  for (const out of [run("--cwd", root), run("--since", join(root, "NEXT_SESSION.md"))]) {
+    expect(out).not.toContain("behind main");
+  }
+  spawnSync("git", ["checkout", "-q", "-b", "wip", "HEAD~2"], { cwd: root });
+  const lag = "HEAD wip is 2 commits behind main; its commits are not counted";
+  expect(run("--cwd", root)).toEndWith(` · ${lag}`);
+  expect(run("--since", join(root, "NEXT_SESSION.md"))).toEndWith(` · ${lag}`);
+  mkdirSync(join(root, "early"));
+  writeFileSync(join(root, "early", "NEXT_SESSION.md"), HANDOFF("2026-08-18T15:00:00-05:00"));
+  expect(run("--since", join(root, "early", "NEXT_SESSION.md"))).toEndWith(` · ${lag}`);   // the window with commits in it
+});
+
 // --- windowSince: the evidence for "which of these are already done?" -------
 
 const HANDOFF = (iso: string) =>

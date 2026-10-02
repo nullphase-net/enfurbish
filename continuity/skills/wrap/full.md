@@ -88,4 +88,6 @@ JOURNAL
 
 **Include only what the user can change:** skills they installed (`Skill` invocations), MCP servers (anything `mcp__*`), hooks (from `hooks` in the scan), project-specific tools they wrote. Built-in Claude Code tools (Read, Write, Edit, MultiEdit, Bash, Grep, Glob, Skill, Agent/Task, AskUserQuestion, WebSearch, WebFetch, NotebookEdit, etc.) are not under user control: no entries for them, even when they errored.
 
+**An `action` needs source the user owns:** their own plugins, project tools, and the hooks and skills they wrote. A third-party skill or MCP server still gets its entry, but the friction goes in `notes`, or a note that it was reported upstream. An action against it has no path to done.
+
 `action` is the highest-value field in the journal; aim for it. An entry with no concrete observation and no action has not justified its existence. Skip the tool.

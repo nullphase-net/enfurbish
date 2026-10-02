@@ -18,6 +18,7 @@ The evidence behind the rules in `SKILL.md` and `full.md`, grouped by step. Noth
 ## Step 4: journal entry
 
 - **JSON in, rendered out.** The prose-owned format produced the 35 spellings above and 98 action lines the documented grep could not see. A format string in a prompt is reassembled from memory every session, and nothing catches a drifted field order.
+- **Actions only where the source is the user's.** On 2026-09-30 all 9 open actions against tools whose source is not the user's (superpowers 3, claude-in-chrome 3, ponytail, the loop skill, auto mode) were retired as covered or never, as one had been earlier. An edit to such a tool is a fork or someone else's PR, so none was ever taken up.
 - **"Absorbed" is not a close.** 20 actions against other tools were closed as absorbed by the global `CLAUDE.md` (2026-09). Six of them became four global rules in one commit, and none of the tools changed.
 
 ## Step 5: NEXT_SESSION.md

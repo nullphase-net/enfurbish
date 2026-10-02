@@ -66,7 +66,8 @@ without a wrap. It reports four states and never guesses between them: `N commit
 still describes HEAD` (the all-clear), `0 commits · N uncommitted … predates uncommitted work`, and
 `window unknown` (no repo, no commits yet, no header, absent file). Paths are resolved against the
 cwd first and the project root second, so the relative path the listing prints can be handed
-straight back.
+straight back. Both counts read HEAD, so when HEAD sits behind the default branch, the listing and
+the window both end with `HEAD <branch> is N commits behind main; its commits are not counted`.
 
 ### `SessionStart` hook
 
@@ -138,11 +139,11 @@ The retro and journal entry are informed by `scan.ts`, which parses the current 
 - Session start/end timestamps and duration
 - User turn count vs model turn count. A user turn is a typed prompt, a slash command, or a pasted attachment; the records Claude Code synthesizes into the user role are excluded — the tag-wrapped ones (`<task-notification>`, `<local-command-stdout>`, `<system-reminder>`), tool results, `[Request interrupted by user]`, and anything flagged `isMeta` (relayed agent messages, `/loop` re-fires, skill bodies) or `isCompactSummary`.
 - Per-tool call counts and error counts, bucketed into `tools` (built-ins) vs `mcp` (`mcp__*` calls)
-- Hooks that fired during the session and how many times
+- Hooks per event: `fired` counts the runs the transcript recorded, one per hook command (a hook that runs silently, as most PreToolUse guards do, records nothing), and `denied` the tool calls a hook blocked
 - `compaction_count` — number of `compact_boundary` events. A compaction does not truncate the transcript, so the counts above still cover the whole session.
 - Skills invoked — both `Skill` tool calls and slash commands typed by the user, so built-in commands (`/clear`, `/compact`) appear here too
 - Files edited (most-recent first, capped at 50), from Edit/Write records only
-- `files_changed`: what git says moved in the repo since the session started, commits plus dirty files modified inside the window. It catches the writes `files_edited` cannot see (heredocs, patch scripts, `cp`), and it is repo-scoped, not session-scoped.
+- `files_changed`: what git says moved in the repo since the session started, commits plus dirty files modified inside the window. It catches the writes `files_edited` cannot see (heredocs, patch scripts, `cp`), and it is repo-scoped, not session-scoped. Work in another worktree of the same repo is included under that worktree's path relative to the repo root (`../repo-main/src/x.c`), since a worktree flow commits from a sibling checkout.
 - `files_changed_predated`: the `files_changed` paths whose only commits in the window were authored before it and that are not dirty in it. `git log --since` reads the commit date, which a rebase, amend or cherry-pick resets, so older work lands in the window; these paths stay listed but are flagged. Absent when there are none. `handoffs.ts --since` marks such commits the same way, `(authored before the header)`.
 - `worktree`: uncommitted and unpushed work in the repo, not bounded by time. `summary` is the final report's `Worktree:` line; `before_session` counts uncommitted paths older than the session.
 - Number of files read

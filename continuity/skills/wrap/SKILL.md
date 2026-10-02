@@ -139,10 +139,10 @@ Most sessions have none.
 **Then re-check affirmation.** If the `affirm` plugin is installed:
 
 ```
-/affirm --since <session_start>
+/affirm --since <session_start> [<dir>...]
 ```
 
-Invoke the skill, not a path; affirm resolves its own lib. Files untouched inside the window produce a single `0 of N` line and nothing to do. When it names a NEW or CHANGED file, put the summary line in the retro rather than asking; sessions end with nobody at the keyboard. Not installed → skip it; the `Affirm:` line of the final report says `not installed` and nothing else does.
+Add each other repo this session edited or committed to as a `<dir>`: the check reads the cwd's instruction files, so a sibling repo's edited `CLAUDE.md` otherwise reads as a clean window. Invoke the skill, not a path; affirm resolves its own lib. Files untouched inside the window produce a single `0 of N` line and nothing to do. When it names a NEW or CHANGED file, put the summary line in the retro rather than asking; sessions end with nobody at the keyboard. Not installed → skip it; the `Affirm:` line of the final report says `not installed` and nothing else does.
 
 ### 7. Final report
 

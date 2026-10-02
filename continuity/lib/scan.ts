@@ -1,6 +1,6 @@
 import { readdirSync, statSync, existsSync, createReadStream, realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { join, basename, dirname } from "node:path";
+import { join, basename, dirname, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { humanizeDelta } from "./humanize";
@@ -97,7 +97,13 @@ export type ScanOk = {
   turn_count: { user: number; model: number };
   tools: Record<string, { calls: number; errors: number }>;
   mcp: Record<string, { calls: number; errors: number }>;
-  hooks: Record<string, { fired: number }>;
+  /**
+   * Per event: `fired` is the hook runs the transcript recorded, one per hook command
+   * (its output channels, a banner or a context block, are not runs). A hook that runs
+   * silently records nothing, so a PreToolUse `fired` is no count of guarded calls.
+   * `denied` is the tool calls a hook blocked, present only when some were.
+   */
+  hooks: Record<string, { fired: number; denied?: number }>;
   /**
    * Number of `system.compact_boundary` events in the transcript. A fact about the
    * session, not a caveat on the counts: a compaction does not truncate the jsonl,
@@ -204,54 +210,80 @@ export const FILES_CHANGED_CAP = 50;
  */
 export function gitChangedSince(cwd: string, iso: string): { files: string[]; predated: string[] } | null {
   if (!cwd || !(Date.parse(iso) > 0)) return null;
-  const git = (...args: string[]) =>
-    spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", maxBuffer: 8 << 20 });
-
-  // Each commit opens with \x01 and its author time, then its paths.
-  const log = git("log", "--name-only", "--pretty=format:%x01%at", `--since=${iso}`);
-  if (log.status !== 0) return null;
   // Both lists below are relative to the repo ROOT whatever `-C` says, and the cwd can
   // be a subdirectory of it. Joined to the cwd instead, every stat from a subdirectory
   // missed and every dirty file was kept as a "deletion".
   const loc = repoLocation(cwd);
   if (!loc) return null;
 
-  // `--porcelain` is stable across git versions by contract; `-z` avoids the quoting
-  // it applies to paths with spaces. XY status is the first two bytes, path the rest.
-  const dirty = git("status", "--porcelain", "-z");
-  // The list's contract is commits AND dirty work. Without the second half a
-  // commits-only list reads as complete, so a failed status is "could not answer".
-  if (dirty.status !== 0) return null;
-
   const cutoff = Date.parse(iso);
   const seen = new Set<string>();
   const authoredIn = new Set<string>();
-  for (const commit of log.stdout.split("\x01")) {
-    const [at, ...paths] = commit.split("\n").map(l => l.trim());
-    for (const f of paths.filter(Boolean)) {
-      seen.add(f);
-      if (Number(at) * 1000 >= cutoff) authoredIn.add(f);
+  const committed = new Set<string>();
+  // One working tree: commits in `range` since the window opened, then dirty paths
+  // whose mtime falls inside it, each path prefixed with `tag`.
+  const scanTree = (top: string, tag: string, range: string[]): boolean => {
+    const git = (...args: string[]) =>
+      spawnSync("git", ["-C", top, ...args], { encoding: "utf8", maxBuffer: 8 << 20 });
+    // Each commit opens with \x01 and its author time, then its paths.
+    const log = git("log", "--name-only", "--pretty=format:%x01%at", `--since=${iso}`, ...range);
+    if (log.status !== 0) return false;
+    // `--porcelain` is stable across git versions by contract; `-z` avoids the quoting
+    // it applies to paths with spaces. XY status is the first two bytes, path the rest.
+    const dirty = git("status", "--porcelain", "-z");
+    // The list's contract is commits AND dirty work. Without the second half a
+    // commits-only list reads as complete, so a failed status is "could not answer".
+    if (dirty.status !== 0) return false;
+    for (const commit of log.stdout.split("\x01")) {
+      const [at, ...paths] = commit.split("\n").map(l => l.trim());
+      for (const f of paths.filter(Boolean)) {
+        seen.add(tag + f);
+        committed.add(tag + f);
+        if (Number(at) * 1000 >= cutoff) authoredIn.add(tag + f);
+      }
     }
+    // A rename emits two NUL fields: `R  <dest>` then a bare `<src>` with no status
+    // bytes. Rather than track which field is which, take a path off either shape ---
+    // the source of a rename did change, so keeping it is right, not a leak.
+    for (const rec of dirty.stdout.split("\0")) {
+      if (!rec) continue;
+      const rel = /^[ MADRCU?!]{2} /.test(rec) ? rec.slice(3) : rec;
+      let m: number;
+      try { m = statSync(join(top, rel)).mtimeMs; } catch { m = Infinity; }
+      if (m > cutoff) { seen.add(tag + rel); authoredIn.add(tag + rel); }
+    }
+    return true;
+  };
+  if (!scanTree(loc.top, "", [])) return null;
+
+  // Every other worktree of this repo: a worktree flow commits from a sibling checkout,
+  // and the scan read none of it (journal 2026-10-01: a commit in ../<repo>-main left
+  // files_changed empty). Its commits that HEAD already holds are listed once, above.
+  // Paths are relative to this repo's root, so each names a real file. A worktree git
+  // cannot read, its directory gone among them, is left out: the cwd's own tree is
+  // still answered.
+  const list = spawnSync("git", ["-C", loc.top, "worktree", "list", "--porcelain"], { encoding: "utf8" });
+  const self = canonical(loc.top);
+  for (const line of list.status === 0 ? list.stdout.split("\n") : []) {
+    const wt = line.startsWith("worktree ") ? line.slice(9) : "";
+    if (!wt || canonical(wt) === self) continue;
+    scanTree(wt, `${relative(loc.top, wt)}/`, ["HEAD", "--not", ...headOf(loc.top)]);
   }
-  const committed = [...seen];
-  // A rename emits two NUL fields: `R  <dest>` then a bare `<src>` with no status
-  // bytes. Rather than track which field is which, take a path off either shape ---
-  // the source of a rename did change, so keeping it is right, not a leak.
-  for (const rec of dirty.stdout.split("\0")) {
-    if (!rec) continue;
-    const rel = /^[ MADRCU?!]{2} /.test(rec) ? rec.slice(3) : rec;
-    let m: number;
-    try { m = statSync(join(loc.top, rel)).mtimeMs; } catch { seen.add(rel); authoredIn.add(rel); continue; }
-    if (m > cutoff) { seen.add(rel); authoredIn.add(rel); }
-  }
+
   // The wrap writes this cwd's pointer inside the session window, so it always
   // qualified and reported the scan's own artifact as session work. A pointer in any
   // other directory belongs to another cwd's wrap and stays.
   seen.delete(`${loc.prefix}NEXT_SESSION.md`);
   return {
     files: [...seen].sort(),
-    predated: committed.filter(f => seen.has(f) && !authoredIn.has(f)).sort(),
+    predated: [...committed].filter(f => seen.has(f) && !authoredIn.has(f)).sort(),
   };
+}
+
+/** HEAD's sha in `top`, as a one-item list, or none on a repo with no commits yet. */
+function headOf(top: string): string[] {
+  const r = spawnSync("git", ["-C", top, "rev-parse", "--verify", "-q", "HEAD"], { encoding: "utf8" });
+  return r.status === 0 ? [r.stdout.trim()] : [];
 }
 
 export type Worktree = {
@@ -382,6 +414,11 @@ function userText(content: unknown): string {
     .join("\n");
 }
 
+/** Attachments that carry a hook's output, recorded beside the run itself. */
+const HOOK_OUTPUT = new Set(["hook_system_message", "hook_additional_context"]);
+/** How Claude Code words a blocked call in its tool_result: `PreToolUse:Bash hook error: <reason>`. */
+const HOOK_DENIAL = /^(\w+):\S+ hook error: /;
+
 export async function parseTranscript(path: string): Promise<ScanOk> {
   let degraded = false;
   let reason = "";
@@ -392,7 +429,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
   let lastTs: string | undefined;
   const tools: Record<string, { calls: number; errors: number }> = {};
   const mcp: Record<string, { calls: number; errors: number }> = {};
-  const hooks: Record<string, { fired: number }> = {};
+  const hooks: Record<string, { fired: number; denied?: number }> = {};
   const skillsSet = new Set<string>();
   const editsByFile = new Map<string, number>();   // file_path → last-seen index
   let editIdx = 0;
@@ -431,7 +468,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
     if (obj.type === "attachment" && obj.attachment?.hookEvent) {
       const ev: string = obj.attachment.hookEvent;
       hooks[ev] = hooks[ev] ?? { fired: 0 };
-      hooks[ev].fired++;
+      if (!HOOK_OUTPUT.has(obj.attachment.type)) hooks[ev].fired++;
       continue;
     }
 
@@ -453,6 +490,11 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
             if (ent && c.is_error) {
               const bucket = ent.bucket === "tools" ? tools : mcp;
               if (bucket[ent.name]) bucket[ent.name].errors++;
+              const ev = HOOK_DENIAL.exec(typeof c.content === "string" ? c.content : userText(c.content))?.[1];
+              if (ev) {
+                hooks[ev] = hooks[ev] ?? { fired: 0 };
+                hooks[ev].denied = (hooks[ev].denied ?? 0) + 1;
+              }
             }
             inflight.delete(c.tool_use_id);
           }
