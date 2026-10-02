@@ -30,13 +30,18 @@ async function runHook(
 
 
 // A session running a stale copy of the plugin whose checkout it is working in.
-function manifests(name: string, running: string, here: string) {
+function manifests(name: string, running: string, here: string, pin?: string) {
   const base = mkdtempSync(join(tmpdir(), "superseded-"));
   const pluginRoot = join(base, "plugins", "cache", "mkt", name, running);
   const projectDir = join(base, "checkout");
   for (const [dir, version] of [[pluginRoot, running], [join(projectDir, name), here]]) {
     mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
     writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name, version }));
+  }
+  if (pin) {
+    mkdirSync(join(projectDir, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(projectDir, ".claude-plugin", "marketplace.json"),
+      JSON.stringify({ plugins: [{ name, source: { source: "git-subdir", ref: pin } }] }));
   }
   return { pluginRoot, projectDir };
 }
@@ -54,6 +59,24 @@ test("supersededNote is empty when the versions match or the cwd is not the chec
   expect(supersededNote(same.pluginRoot, same.projectDir)).toBe("");
   const other = manifests("pastiche", "0.1.0", "0.2.0");
   expect(supersededNote(other.pluginRoot, mkdtempSync(join(tmpdir(), "elsewhere-")))).toBe("");
+});
+
+// The catalog pins each plugin to a tag, so a newer checkout is one of two states:
+// released, where update installs it, or a bump waiting on main, where update answers
+// "already at the latest version" and a session read that as a broken update.
+test("supersededNote says whether marketplace.json pins the checkout's version", () => {
+  const update = "`claude plugin update pastiche@mkt`";
+  const released = manifests("pastiche", "0.1.0", "0.2.0", "pastiche-v0.2.0");
+  const line = `pastiche 0.1.0 is running, but this checkout has 0.2.0, pinned as pastiche-v0.2.0. Run ${update}, then /reload-plugins. ` +
+    'If it answers "already at the latest version", push the pin and the tag first.';
+  expect(supersededNote(released.pluginRoot, released.projectDir)).toBe(line);
+  expect(supersededNote(released.pluginRoot, join(released.projectDir, "pastiche"))).toBe(line);
+  const waiting = manifests("pastiche", "0.1.0", "0.2.0", "pastiche-v0.1.0");
+  expect(supersededNote(waiting.pluginRoot, waiting.projectDir)).toBe(
+    "pastiche 0.1.0 is running, but this checkout has 0.2.0, unreleased: marketplace.json pins pastiche-v0.1.0. " +
+    `Tag it, pin the tag and push, then ${update} and /reload-plugins. Before the push, update answers "already at the latest version".`);
+  const between = manifests("pastiche", "0.1.0", "0.3.0", "pastiche-v0.2.0");
+  expect(supersededNote(between.pluginRoot, between.projectDir)).not.toContain("already at the latest");
 });
 
 test("hook emits the note on both channels even with no languages configured", async () => {

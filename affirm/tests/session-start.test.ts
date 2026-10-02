@@ -25,14 +25,13 @@ function mkDir(prefix: string): string {
 
 const SCRIPT = join(import.meta.dir, "..", "hooks", "session-start.ts");
 
+// Never the developer's own ~/.claude: an unaffirmed edit to the real global
+// CLAUDE.md turned both `{}` tests red (2026-10-01).
 function runHook(env: Record<string, string>, hashPath?: string, stdin?: string) {
+  const home = hashPath ?? env.HOME ?? mkDir("affirm-home-");
   return spawnSync("bun", ["run", SCRIPT], {
     encoding: "utf8",
-    env: {
-      ...process.env,
-      ...env,
-      ...(hashPath ? { HOME: hashPath, AFFIRM_GLOBAL_DIR: join(hashPath, ".claude") } : {}),
-    },
+    env: { ...process.env, ...env, HOME: home, AFFIRM_GLOBAL_DIR: join(home, ".claude") },
     input: stdin,
   });
 }
@@ -168,13 +167,18 @@ test("hook reports a parent's CLAUDE.md on a subdirectory launch", () => {
 
 
 // A session running a stale copy of the plugin whose checkout it is working in.
-function manifests(name: string, running: string, here: string) {
+function manifests(name: string, running: string, here: string, pin?: string) {
   const base = mkdtempSync(join(tmpdir(), "superseded-"));
   const pluginRoot = join(base, "plugins", "cache", "mkt", name, running);
   const projectDir = join(base, "checkout");
   for (const [dir, version] of [[pluginRoot, running], [join(projectDir, name), here]]) {
     mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
     writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name, version }));
+  }
+  if (pin) {
+    mkdirSync(join(projectDir, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(projectDir, ".claude-plugin", "marketplace.json"),
+      JSON.stringify({ plugins: [{ name, source: { source: "git-subdir", ref: pin } }] }));
   }
   return { pluginRoot, projectDir };
 }
@@ -192,6 +196,24 @@ test("supersededNote is empty when the versions match or the cwd is not the chec
   expect(supersededNote(same.pluginRoot, same.projectDir)).toBe("");
   const other = manifests("affirm", "0.1.0", "0.2.0");
   expect(supersededNote(other.pluginRoot, mkdtempSync(join(tmpdir(), "elsewhere-")))).toBe("");
+});
+
+// The catalog pins each plugin to a tag, so a newer checkout is one of two states:
+// released, where update installs it, or a bump waiting on main, where update answers
+// "already at the latest version" and a session read that as a broken update.
+test("supersededNote says whether marketplace.json pins the checkout's version", () => {
+  const update = "`claude plugin update affirm@mkt`";
+  const released = manifests("affirm", "0.1.0", "0.2.0", "affirm-v0.2.0");
+  const line = `affirm 0.1.0 is running, but this checkout has 0.2.0, pinned as affirm-v0.2.0. Run ${update}, then /reload-plugins. ` +
+    'If it answers "already at the latest version", push the pin and the tag first.';
+  expect(supersededNote(released.pluginRoot, released.projectDir)).toBe(line);
+  expect(supersededNote(released.pluginRoot, join(released.projectDir, "affirm"))).toBe(line);
+  const waiting = manifests("affirm", "0.1.0", "0.2.0", "affirm-v0.1.0");
+  expect(supersededNote(waiting.pluginRoot, waiting.projectDir)).toBe(
+    "affirm 0.1.0 is running, but this checkout has 0.2.0, unreleased: marketplace.json pins affirm-v0.1.0. " +
+    `Tag it, pin the tag and push, then ${update} and /reload-plugins. Before the push, update answers "already at the latest version".`);
+  const between = manifests("affirm", "0.1.0", "0.3.0", "affirm-v0.2.0");
+  expect(supersededNote(between.pluginRoot, between.projectDir)).not.toContain("already at the latest");
 });
 
 test("hook emits the note on both channels beside the banner", () => {

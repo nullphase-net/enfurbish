@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { appendFileSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
 import {
   collect,
@@ -120,21 +120,42 @@ function readHookInput(): { sessionId: string | null; source: string | null } {
  * plugin's own directory in it), the versions match, or a manifest will not read.
  */
 export function supersededNote(pluginRoot: string, projectDir: string): string {
-  const read = (dir: string) => {
+  const read = (file: string) => {
     try {
-      return JSON.parse(readFileSync(join(dir, ".claude-plugin", "plugin.json"), "utf8"));
+      return JSON.parse(readFileSync(file, "utf8"));
     } catch {
       return null;
     }
   };
-  const running = read(pluginRoot);
+  const manifest = (dir: string) => read(join(dir, ".claude-plugin", "plugin.json"));
+  const running = manifest(pluginRoot);
   if (typeof running?.name !== "string" || typeof running?.version !== "string") return "";
-  const here = [join(projectDir, running.name), projectDir].map(read).find((m) => m?.name === running.name);
+  const dir = [join(projectDir, running.name), projectDir].find((d) => manifest(d)?.name === running.name);
+  const here = dir ? manifest(dir) : null;
   if (typeof here?.version !== "string" || here.version === running.version) return "";
   const market = /\/plugins\/cache\/([^/]+)\//.exec(pluginRoot)?.[1];
   const update = market ? `\`claude plugin update ${running.name}@${market}\`` : "update the plugin";
-  return `${running.name} ${running.version} is running, but this checkout has ${here.version}. ` +
-    `It reaches sessions only once released: tag it, pin the tag in marketplace.json, push, then ${update}, then /reload-plugins.`;
+  const head = `${running.name} ${running.version} is running, but this checkout has ${here.version}`;
+  // The catalog at the checkout root pins each plugin to a tag, so a newer checkout
+  // is released (update installs it) or a bump on main waiting for its tag, where
+  // update answers "already at the latest version" and a session read that as broken.
+  const catalog = read(join(dirname(dir!), ".claude-plugin", "marketplace.json"));
+  const ref = Array.isArray(catalog?.plugins)
+    ? catalog.plugins.find((p: any) => p?.name === running.name)?.source?.ref
+    : undefined;
+  if (typeof ref !== "string") {
+    return `${head}. It reaches sessions only once released: tag it, pin the tag in marketplace.json, push, then ${update}, then /reload-plugins.`;
+  }
+  if (ref === `${running.name}-v${here.version}`) {
+    // The pin read here is the local one; update reads the pushed catalog, and a
+    // release tagged but not pushed is a state the journal records more than once.
+    return `${head}, pinned as ${ref}. Run ${update}, then /reload-plugins. ` +
+      'If it answers "already at the latest version", push the pin and the tag first.';
+  }
+  const latest = ref === `${running.name}-v${running.version}`
+    ? ' Before the push, update answers "already at the latest version".'
+    : "";
+  return `${head}, unreleased: marketplace.json pins ${ref}. Tag it, pin the tag and push, then ${update} and /reload-plugins.${latest}`;
 }
 
 const DEFAULT_FIRSTFIRE_DIR = join(homedir(), ".claude", "state", "continuity-firstfire");
