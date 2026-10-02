@@ -56,10 +56,10 @@ If a change touches more than one plugin, version each one on its own and give e
      claude plugin marketplace add nullphase-net/enfurbish && claude plugin install "$p@enfurbish"
    ) && jq -r --arg k "$p@enfurbish" '.plugins[$k][0] | "\(.version) \(.gitCommitSha)"' "$d/plugins/installed_plugins.json"
    echo "$(git show "$t:$p/.claude-plugin/plugin.json" | jq -r .version) $(git rev-parse "$t^{commit}")"
-   rm -rf "$d"
+   echo rm -rf "$d"
    ```
 
-   The two printed lines must match. A clone error naming `git@github.com` means a `url` in `marketplace.json` is not the HTTPS form (see "What installs"). A clone error naming the tag means the push did not carry it. A version or sha that differs means the pin names a different tag, or the tagged commit was not bumped. `claude plugin validate .` passes in all three cases.
+   The first two printed lines must match. The third prints the cleanup rather than running it: a delete whose target is a variable runs once as `echo` first. Check that it names the `mktemp -d` directory, then run it with that literal path. A clone error naming `git@github.com` means a `url` in `marketplace.json` is not the HTTPS form (see "What installs"). A clone error naming the tag means the push did not carry it. A version or sha that differs means the pin names a different tag, or the tagged commit was not bumped. `claude plugin validate .` passes in all three cases.
 8. On any machine running the plugin, run `claude plugin update <name>@enfurbish` (or `/plugin update`), then `/reload-plugins`. The installed copy is a snapshot under `cache/`, not a clone, and auto-update is off for a third-party marketplace unless someone turned it on, so nothing arrives until then.
 
 Until step 8 runs, each plugin's `SessionStart` hook says so in any session whose cwd is this checkout (or the plugin's own directory in it): `continuity 0.11.0 is running, but this checkout has 0.12.0. …` on both channels. It compares the running copy's `plugin.json` against the checkout's, so it also fires after a checkout moves back to an older commit, and while a bump on `main` waits for its release. The checkout's `marketplace.json` tells those apart: `pinned as <tag>` means the release is cut and the update will install it once the pin and tag are pushed; `unreleased: marketplace.json pins <tag>` means steps 4–6 are still to do, and until the push the update answers "already at the latest version".
