@@ -284,6 +284,24 @@ test("--since lists an affirmed file without prompting to re-affirm it", () => {
   expect(out).not.toContain("run /affirm -a after reviewing");
 });
 
+// The graph is the cwd's, so a wrap in a hub repo that edited its siblings'
+// instruction files read a clean window (journal, 2026-09-28).
+test("--since reports each extra directory once, with its own call to action", () => {
+  const hub = projectWithClaudeMd("# hub\n");
+  const sib = mkProject().dir;
+  writeFileSync(join(sib, "CLAUDE.md"), "# sibling\n");
+  const io = collect();
+  const gone = join(sib, "no-such-dir");
+  expect(runCli(["--since", "2020-01-01T00:00:00Z", sib, gone, hub.dir], opts(hub.dir, hub.hashPath, io))).toBe(0);
+  const out = io.out;
+  expect(out[0]).toBe("1 of 1 touched since 2020-01-01T00:00:00Z");
+  expect(out).toContain("run /affirm -a after reviewing");
+  expect(out).toContain(`${sib}: 1 of 1 touched since 2020-01-01T00:00:00Z`);
+  expect(out).toContain(`run /affirm -a in ${sib} after reviewing`);
+  expect(out).toContain(`${gone}: no such directory`);
+  expect(out.at(-1)).toBe(`${hub.dir}: no instruction files beyond those above`);
+});
+
 test("--since rejects a missing or unparseable timestamp", () => {
   const { dir, hashPath } = projectWithClaudeMd("# rules\n");
   const io = collect();

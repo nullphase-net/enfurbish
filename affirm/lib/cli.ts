@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { dirname } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import {
   HASH_FILE,
   approveAll,
@@ -22,7 +23,9 @@ function usage(): string {
     "Usage:",
     "  affirm                show status, mtime, and git info for instruction files in cwd",
     "  affirm -a, --apply    record SHA-256 hashes (the attestation)",
-    "  affirm --since <iso>  which instruction files changed after <iso>, and how",
+    "  affirm --since <iso> [dir...]",
+    "                        which instruction files changed after <iso>, and how;",
+    "                        each dir adds its own, for a session that edited other repos",
     "  affirm -h, --help     show this message",
   ].join("\n");
 }
@@ -113,6 +116,7 @@ export function renderSince(
   stored: Record<string, string>,
   iso: string,
   out: (s: string) => void,
+  where = "",
 ): void {
   const cutoff = Date.parse(iso);
   if (!(cutoff > 0)) {
@@ -147,7 +151,7 @@ export function renderSince(
   // Only when the hash actually moved. A file edited and reverted within the session
   // is touched but still affirmed, and prompting for it would be the alert fatigue
   // this whole gate exists to avoid.
-  if (needsReview) out(`run /affirm -a after reviewing`);
+  if (needsReview) out(`run /affirm -a${where} after reviewing`);
 }
 
 /** Why a touched file has no commits in the window. Only "tracked" means there were none. */
@@ -216,7 +220,32 @@ export function runCli(argv: string[], opts: CliOpts): number {
       opts.err(`--since needs an ISO timestamp\n\n${usage()}`);
       return 2;
     }
-    renderSince(projectDir, graph, loadHashes(hashPath), iso, opts.out);
+    // More directories after the timestamp: the graph is the cwd's, so a wrap in a hub
+    // repo that edited its siblings' instruction files read a clean window (journal
+    // 2026-09-28). A file an earlier block listed (a global, a shared ancestor) is not
+    // repeated, and each block's call to action names the directory -a must run in.
+    const stored = loadHashes(hashPath);
+    const shown = new Set(graph.files.map((f) => f.path));
+    renderSince(projectDir, graph, stored, iso, opts.out);
+    for (const extra of argv.slice(2)) {
+      const dir = normalizeProjectDir(resolve(opts.cwd, extra));
+      const label = displayPath(projectDir, dir);
+      // A typo would otherwise walk its existing ancestors and read as a clean answer.
+      if (!existsSync(dir)) {
+        opts.out(`${label}: no such directory`);
+        continue;
+      }
+      const g = buildInstructionGraph(dir);
+      const files = g.files.filter((f) => !shown.has(f.path));
+      if (files.length === 0) {
+        opts.out(`${label}: no instruction files beyond those above`);
+        continue;
+      }
+      files.forEach((f) => shown.add(f.path));
+      let first = true;
+      const out = (s: string) => (opts.out(first ? `${label}: ${s}` : s), (first = false));
+      renderSince(dir, { ...g, files }, stored, iso, out, ` in ${label}`);
+    }
     return 0;
   }
 
