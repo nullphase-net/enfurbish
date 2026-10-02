@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildContext, DORMANT_AFTER, formatCorrection, formatEntry, loadConfig, loadNotes, mark,
-  parseLedger, recordSurfaced, restamp, stalest, tag, today, untaggedCount, type Entry, type Surfaced,
+  loadSurfaced, parseLedger, recordSurfaced, restamp, stalest, tag, termOf, today, untaggedCount,
+  type Entry, type Surfaced,
 } from "../lib/pastiche";
 
 const LEDGER = `# Ledger
@@ -116,6 +117,30 @@ describe("dormancy", () => {
       s = show(e, [id], "2026-03-03", s);
       expect(stalest(e, 1, s)[0].term).toBe(DAD);
     }
+  });
+
+  // The count belongs to the term. Keyed on the whole line, a gloss rewrite or a
+  // --dedupe orphaned it: the merged lines of 2026-09-29 kept the first copy's
+  // record and dropped the others' counts.
+  test("a new gloss or romanization keeps the term's count", () => {
+    const e = parseLedger(FAMILY);
+    const s = show(e, Array.from({ length: DORMANT_AFTER - 1 }, (_, i) => `s${i}`));
+    const reglossed = parseLedger(FAMILY.replace("ប៉ា (pa) — dad", "ប៉ា (paa) — father"));
+    expect(stalest(reglossed, 1, show(reglossed, ["last"], "2026-03-01", s))[0].term).toBe(MOM);
+  });
+
+  test("a sidecar keyed on whole lines is re-keyed by term when it loads", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "pastiche-surfaced-")), "surfaced.json");
+    writeFileSync(path, JSON.stringify({
+      "km: ប៉ា (pa) — dad": { at: "2026-01-10", sessions: ["x"] },
+      "km: ប៉ា (pa) — father": { at: "2026-03-01", sessions: [] },   // the copy that rotated
+      "km: ប៉ា (pa) — papa": { at: "2026-01-20", sessions: ["y"] },
+    }));
+    const e = parseLedger(FAMILY);
+    const s = loadSurfaced(path);
+    expect(Object.keys(s)).toEqual([termOf(e[0])]);
+    expect(stalest(e, 1, s)[0].term).toBe(MOM);
+    expect(loadSurfaced(path)).toEqual(s);   // idempotent: a re-keyed sidecar reads back unchanged
   });
 });
 

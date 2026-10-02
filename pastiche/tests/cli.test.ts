@@ -229,6 +229,42 @@ describe("which lines a needle names", () => {
     expect(said.slice(1)).toEqual(["  near: es: la red — network", "  near: es: la redirección — a redirect"]);
     expect(readFileSync(c.ledger, "utf8")).toBe(seed);
   });
+
+  // The hook's due list prints `es: <term> — <gloss>  [subj]  [last used …]`, and
+  // pasting it back is the natural first call. Until 2026-10-01 it read "no match":
+  // six consecutive calls in one session, the ledger untouched.
+  test("a pasted due line resolves to its term", () => {
+    for (const needle of ["es: la red — network", "es: la red — network  [untagged]  [last used 2026-02-01]"]) {
+      const c = fixture(SEED);
+      const said: string[] = [];
+      main(["--seen", needle], c, s => said.push(s));
+      expect(said.join("\n")).not.toContain("no match");
+      expect(readFileSync(c.ledger, "utf8")).toContain(`network | 2026-02-01 | ✓ | seen: ${NOW}`);
+    }
+  });
+
+  test("a code on the needle confines it to that language", () => {
+    const seed =
+      "- km: ok — fine | 2026-01-01 | seen: 2026-01-01\n" +
+      "- es: ok — vale | 2026-01-01 | seen: 2026-01-01\n";
+    const c = fixture(seed);
+    main(["--seen", "es: ok"], c);
+    expect(readFileSync(c.ledger, "utf8")).toBe(seed.replace(`vale | 2026-01-01 | seen: 2026-01-01`, `vale | 2026-01-01 | seen: ${NOW}`));
+  });
+
+  test("a coded fragment still reports its ambiguity and its near terms", () => {
+    const seed =
+      "- es: la red — network | 2026-01-01 | seen: 2026-01-01\n" +
+      "- es: la redirección — a redirect | 2026-01-01 | seen: 2026-01-01\n";
+    const c = fixture(seed);
+    const said: string[] = [];
+    main(["--seen", "es: la re"], c, s => said.push(s));
+    expect(said[0]).toBe(`ambiguous "es: la re": 2 terms contain it — name one`);
+    const miss: string[] = [];
+    main(["--seen", "es: la redx bogus"], c, s => miss.push(s));
+    expect(miss.slice(1)).toEqual(["  near: es: la red — network", "  near: es: la redirección — a redirect"]);
+    expect(readFileSync(c.ledger, "utf8")).toBe(seed);
+  });
 });
 
 describe("default and --path", () => {

@@ -74,8 +74,8 @@ Rotation has two inputs. Sessions restamp what they use, so used items move to t
 unused ones drift to the front. And an item the hook shows in 3 sessions that never use it
 moves to the back on its own, dated that day, and comes back once everything else has rotated
 past it. Without that, the few items no session had an opening for held the head of the due
-list for three weeks. The hook keeps the count in `surfaced.json` beside your config, one
-entry per session, so re-injecting after a compaction counts once, and it says
+list for three weeks. The hook keeps the count in `surfaced.json` beside your config, per term (a new gloss keeps it),
+one entry per session, so re-injecting after a compaction counts once, and it says
 `rotated to back` under the due list in the session that rotates an item. There are no
 intervals and no ease factors.
 
@@ -148,7 +148,7 @@ interna`); failing that, a fragment of exactly one term's text resolves to it (`
 fragment spanning several terms is reported as ambiguous with the candidates, and nothing is
 written. Until 0.8.0 the needle was a substring of the whole line: replaying 54 real calls, 7
 restamped 16 lines of *other* terms, moving them out of the due list unused, and a mark on
-`អរគុណ (arkun)` left its `(arkun / awkun)` copy due.
+`អរគុណ (arkun)` left its `(arkun / awkun)` copy due. A needle may also lead with its language, as every due line does: `--seen "es: la red — network"` resolves to `la red` in Spanish only, so a due line pasted back whole works.
 
 Bare `--add <code>` with no body is still arg misuse (exit 2), not a blocking read on a tty —
 the `-` is required to ask for stdin.

@@ -122,16 +122,15 @@ export function stalest(entries: Entry[], n: number, surfaced: Surfaced = {}): E
 export const DORMANT_AFTER = 3;
 
 /**
- * Per item: the date its count started (or it last rotated), and the sessions
- * that have shown it since. Keyed by code and term, not by line, so a tag or a
- * ✓ does not reset the count; a new gloss does, which is fine.
+ * Per term: the date its count started (or it last rotated), and the sessions
+ * that have shown it since. Keyed by `termOf`, so a tag, a ✓, a new gloss or a
+ * merged copy keeps the count. Until 2026-10-01 the key was the whole body, and
+ * the 2026-09-29 `--dedupe` dropped every merged copy's count.
  */
 export type Surfaced = Record<string, { at: string; sessions: string[] }>;
 
-const keyOf = (e: Entry) => `${e.code}: ${e.term}`;
-
 function rotation(e: Entry, s: Surfaced): string {
-  const at = s[keyOf(e)]?.at;
+  const at = s[termOf(e)]?.at;
   return typeof at === "string" && at > e.seen ? at : e.seen;
 }
 
@@ -153,7 +152,7 @@ function rotation(e: Entry, s: Surfaced): string {
 export function recordSurfaced(s: Surfaced, shown: Entry[], sessionId: string, date: string): Surfaced {
   const next = { ...s };
   for (const e of shown) {
-    const k = keyOf(e);
+    const k = termOf(e);
     const prev = next[k];
     const rec = prev && Array.isArray(prev.sessions) && prev.at >= e.seen
       ? prev
@@ -179,10 +178,26 @@ export function loadSurfaced(path?: string): Surfaced {
   if (!path || !existsSync(path)) return {};
   try {
     const raw = JSON.parse(readFileSync(path, "utf8"));
-    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? byTerm(raw) : {};
   } catch {
     return {};
   }
+}
+
+/**
+ * Re-key a sidecar written as `<code>: <whole body>`: an orphaned record would
+ * put every rotated item back at the head of the due list at once. Where several
+ * old keys name one term, the latest `at` wins, the newest state the term was in.
+ * The hook saves what it loaded, so the first fire after this rewrites the file.
+ */
+function byTerm(s: Surfaced): Surfaced {
+  const out: Surfaced = {};
+  for (const [k, rec] of Object.entries(s)) {
+    const code = CODE.exec(`- ${k}`);
+    const key = code ? termOf({ code: code[1], term: k.slice(code[0].length - 2) } as Entry) : k;
+    if (!(key in out) || String(rec?.at) > String(out[key]?.at)) out[key] = rec;
+  }
+  return out;
 }
 
 /**
@@ -286,11 +301,11 @@ function tagLine(l: string, subject: string): string {
  * `la redirección` and `la redundancia` out of the due list unused.
  */
 export function matchingLines(text: string, needle: string): string[] {
-  const entries = parseLedger(text);
-  const want = termKey(needle);
+  const [entries, bare] = scope(parseLedger(text), needle);
+  const want = termKey(bare);
   let key: string | undefined = entries.some(e => termKey(e.term) === want) ? want : undefined;
   if (key === undefined) {
-    const terms = termsContaining(entries, needle);
+    const terms = termsContaining(entries, bare);
     if (terms.length === 1) key = terms[0];
   }
   return key === undefined ? [] : entries.filter(e => termKey(e.term) === key).map(e => e.line);
@@ -298,7 +313,19 @@ export function matchingLines(text: string, needle: string): string[] {
 
 /** The distinct terms whose text contains `needle`, in ledger order. */
 export function termsContaining(entries: Entry[], needle: string): string[] {
-  return [...new Set(entries.filter(e => e.term.includes(needle)).map(e => termKey(e.term)))];
+  const [scoped, bare] = scope(entries, needle);
+  return [...new Set(scoped.filter(e => e.term.includes(bare)).map(e => termKey(e.term)))];
+}
+
+/**
+ * A needle may lead with its language, as every due line does (`es: la red — network`),
+ * and pasting one back is the natural first call: until 2026-10-01 it matched nothing,
+ * six consecutive calls in one session. The code confines the search to that language;
+ * the rest of the line is cut at the gloss by `termKey`, brackets and all.
+ */
+function scope(entries: Entry[], needle: string): [Entry[], string] {
+  const code = CODE.exec(`- ${needle}`);
+  return code ? [entries.filter(e => e.code === code[1]), needle.slice(code[0].length - 2)] : [entries, needle];
 }
 
 /**
@@ -619,8 +646,9 @@ export function main(
         return near(terms), 0;
       }
       out(`no match ${JSON.stringify(needle)} in ${entries.length} entries`);
-      // Retry on the leading token and show what it nearly hit.
-      const head = needle.split(" ")[0];
+      // Retry on the leading token, after any code, and show what it nearly hit.
+      const code = CODE.exec(`- ${needle}`)?.[0].slice(2) ?? "";
+      const head = code + needle.slice(code.length).split(" ")[0];
       return near(head === needle ? [] : termsContaining(entries, head)), 0;
     }
 
