@@ -208,7 +208,12 @@ export const FILES_CHANGED_CAP = 50;
  * The full list comes back uncapped; the caller caps it, because a cap that discards
  * the count of what it discarded is the silent-truncation this repo bans.
  */
-export function gitChangedSince(cwd: string, iso: string): { files: string[]; predated: string[] } | null {
+export function gitChangedSince(
+  cwd: string,
+  iso: string,
+  /** The session's tool inputs, as text: a sibling worktree counts only if one names it. */
+  reached: string[] = [],
+): { files: string[]; predated: string[] } | null {
   if (!cwd || !(Date.parse(iso) > 0)) return null;
   // Both lists below are relative to the repo ROOT whatever `-C` says, and the cwd can
   // be a subdirectory of it. Joined to the cwd instead, every stat from a subdirectory
@@ -256,9 +261,12 @@ export function gitChangedSince(cwd: string, iso: string): { files: string[]; pr
   };
   if (!scanTree(loc.top, "", [])) return null;
 
-  // Every other worktree of this repo: a worktree flow commits from a sibling checkout,
-  // and the scan read none of it (journal 2026-10-01: a commit in ../<repo>-main left
-  // files_changed empty). Its commits that HEAD already holds are listed once, above.
+  // Every other worktree of this repo that the session named: a worktree flow commits
+  // from a sibling checkout, and the scan read none of it (journal 2026-10-01: a commit
+  // in ../<repo>-main left files_changed empty). Committing there takes a `cd`, a
+  // `git -C` or a path into it, while a sibling nobody named is another session's,
+  // which is why `git log --branches` was not the fix either. Its commits that HEAD
+  // already holds are listed once, above.
   // Paths are relative to this repo's root, so each names a real file. A worktree git
   // cannot read, its directory gone among them, is left out: the cwd's own tree is
   // still answered.
@@ -267,6 +275,8 @@ export function gitChangedSince(cwd: string, iso: string): { files: string[]; pr
   for (const line of list.status === 0 ? list.stdout.split("\n") : []) {
     const wt = line.startsWith("worktree ") ? line.slice(9) : "";
     if (!wt || canonical(wt) === self) continue;
+    const names = [wt, canonical(wt), `../${basename(wt)}`];
+    if (!reached.some(r => names.some(n => r.includes(n)))) continue;
     scanTree(wt, `${relative(loc.top, wt)}/`, ["HEAD", "--not", ...headOf(loc.top)]);
   }
 
@@ -434,6 +444,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
   const editsByFile = new Map<string, number>();   // file_path → last-seen index
   let editIdx = 0;
   const filesRead = new Set<string>(); // distinct paths, like files_edited; tools.Read.calls counts calls
+  const reached = new Set<string>();
   let userTurns = 0;
   let modelTurns = 0;
   let compactionCount = 0;
@@ -456,6 +467,11 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
       degraded = true;
       reason = `JSONL parse error at line ${lineNo}`;
       continue;
+    }
+    // Where the session went, for the sibling worktrees `gitChangedSince` may count:
+    // every tool input, a subagent's included. A `cd` into one is an input too.
+    if (obj.type === "assistant" && Array.isArray(obj.message?.content)) {
+      for (const c of obj.message.content) if (c?.type === "tool_use") reached.add(JSON.stringify(c.input ?? null));
     }
     if (obj.isSidechain) continue; // skip subagent events
     if (typeof obj.cwd === "string" && !cwd) cwd = obj.cwd;
@@ -554,7 +570,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
   // Whenever Bash ran, not only when files_edited came back empty: one Edit call
   // beside twenty heredoc writes yields a non-empty list that is still not the story.
   const bash = (tools.Bash?.calls ?? 0) > 0;
-  const changed = bash ? gitChangedSince(cwd, firstTs!) : null;
+  const changed = bash ? gitChangedSince(cwd, firstTs!, [...reached]) : null;
   const gitChanged = changed?.files ?? null;
   const predated = changed?.predated ?? [];
   const top = gitChanged?.length ? repoLocation(cwd)?.top : undefined;

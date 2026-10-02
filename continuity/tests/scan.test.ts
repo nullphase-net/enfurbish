@@ -562,19 +562,40 @@ function commitAt(root: string, file: string, iso: string) {
 // A worktree flow commits from a sibling checkout of the same repo, and the scan read
 // only the cwd's tree: a session that committed in ../<repo>-main read
 // files_changed: [] from the primary checkout (journal, 2026-10-01). The sibling's
-// paths come back relative to this repo's root, so each one names a real file.
-test("gitChangedSince adds work done in a sibling worktree, once, under its path", () => {
+// paths come back relative to this repo's root, so each one names a real file. But
+// parallel sessions run one per worktree too, so a sibling counts only when this
+// session named it: committing there meant a `cd`, a `git -C` or a path into it.
+function withSibling(): { root: string; sib: string; rel: string } {
   const root = realpathSync(repoAt("2026-08-18T18:00:00-05:00"));
   const sib = `${root}-sib`;
   spawnSync("git", ["worktree", "add", "-q", "-b", "feature", sib], { cwd: root });
   commitAt(sib, "sib.txt", "2026-08-18T18:30:00-05:00");
   writeFileSync(join(sib, "dirty.txt"), "y");
-  const rel = `../${basename(sib)}`;
+  return { root, sib, rel: `../${basename(sib)}` };
+}
+
+test("gitChangedSince adds a sibling worktree the session named, once, under its path", () => {
+  const { root, sib, rel } = withSibling();
+  const iso = "2026-08-18T17:00:00-05:00";
   // committed.txt is in the window on both branches: listed once, as the cwd's own.
-  expect(gitChangedSince(root, "2026-08-18T17:00:00-05:00")!.files)
-    .toEqual([`${rel}/dirty.txt`, `${rel}/sib.txt`, "committed.txt"]);
+  const both = [`${rel}/dirty.txt`, `${rel}/sib.txt`, "committed.txt"];
+  expect(gitChangedSince(root, iso, [`{"command":"cd ${rel} && git commit -qam x"}`])!.files).toEqual(both);
+  expect(gitChangedSince(root, iso, [`{"file_path":"${sib}/dirty.txt"}`])!.files).toEqual(both);   // an absolute path
+  // Another session's worktree: never named here, so none of its work is this session's.
+  expect(gitChangedSince(root, iso, [`{"command":"git status"}`])!.files).toEqual(["committed.txt"]);
+  expect(gitChangedSince(root, iso)!.files).toEqual(["committed.txt"]);
   rmSync(sib, { recursive: true });   // a worktree whose directory is gone has nothing to report
-  expect(gitChangedSince(root, "2026-08-18T17:00:00-05:00")!.files).toEqual(["committed.txt"]);
+  expect(gitChangedSince(root, iso, [sib])!.files).toEqual(["committed.txt"]);
+});
+
+test("parseTranscript names a sibling worktree from the session's own tool inputs", async () => {
+  const { root, sib, rel } = withSibling();
+  // The session opens at 18:30, after committed.txt; the sibling's commit and its
+  // dirty file both fall inside it.
+  const r = await parseTranscript(mixedSession(root, [join(sib, "dirty.txt")]));
+  expect(r.files_changed).toEqual([`${rel}/dirty.txt`, `${rel}/sib.txt`]);
+  const other = withSibling();
+  expect((await parseTranscript(mixedSession(other.root, []))).files_changed).toEqual([]);
 });
 
 test("gitChangedSince flags a path whose only commit in the window was authored before it", () => {
