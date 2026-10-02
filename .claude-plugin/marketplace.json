@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "continuity",
-      "source": { "source": "git-subdir", "url": "https://github.com/nullphase-net/enfurbish.git", "path": "continuity", "ref": "continuity-v0.16.2" },
+      "source": { "source": "git-subdir", "url": "https://github.com/nullphase-net/enfurbish.git", "path": "continuity", "ref": "continuity-v0.17.0" },
       "description": "Intentional session continuity: /wrap retro, /next command, and a SessionStart hook that surfaces NEXT_SESSION.md handoffs.",
       "author": { "name": "phreakocious" },
       "category": "workflow",
@@ -16,7 +16,7 @@
     },
     {
       "name": "affirm",
-      "source": { "source": "git-subdir", "url": "https://github.com/nullphase-net/enfurbish.git", "path": "affirm", "ref": "affirm-v0.8.1" },
+      "source": { "source": "git-subdir", "url": "https://github.com/nullphase-net/enfurbish.git", "path": "affirm", "ref": "affirm-v0.9.0" },
       "description": "Approval gate for project instructions. Surfaces new or modified CLAUDE.md and .claude/rules/* files at session start before Claude treats them as trusted.",
       "author": { "name": "phreakocious" },
       "category": "security",
@@ -24,7 +24,7 @@
     },
     {
       "name": "pastiche",
-      "source": { "source": "git-subdir", "url": "https://github.com/nullphase-net/enfurbish.git", "path": "pastiche", "ref": "pastiche-v0.10.1" },
+      "source": { "source": "git-subdir", "url": "https://github.com/nullphase-net/enfurbish.git", "path": "pastiche", "ref": "pastiche-v0.11.0" },
       "description": "Ambient language learning. A SessionStart hook weaves vocabulary into ordinary sessions — stale items you are forgetting, a small budget of new terms drawn from the work itself, and anything you use unprompted recorded rather than taught back at you. The ledger is a markdown file you own, written by a CLI rather than by hand.",
       "author": { "name": "phreakocious" },
       "category": "workflow",
