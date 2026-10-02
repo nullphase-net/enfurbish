@@ -19,7 +19,7 @@ Use when the user wants to pick up where the last session left off, or to re-con
 
 2. **Read the pointer the report marks `*`.** Not the local one, unless they are the same file. Cwd varies between sessions in one project — an autonomous run in a subdirectory writes its own handoff — and reading the cwd-local file because it was closest is what cost a session real turns on 2026-08-18.
    - If the local file is not the newest, say so in one line before summarizing: which file you read, and how much staler the local one is.
-   - If there are no handoffs at all: tell the user nothing is staged and stop. Don't synthesize a follow-up plan from thin air. A session-start hook that already printed another tool's open list is the exception: that list is the briefing, and the absent file is the designed shape there (step 3).
+   - If there are no handoffs at all: tell the user nothing is staged and stop. Don't synthesize a follow-up plan from thin air. A session-start hook that already printed another tool's open list is the exception, when that output names this project by its path or its directory name: that list is the briefing, and the absent file is the designed shape there (step 3). A list that names no project, or another one, could belong to any project. Say nothing is staged, and name the output you passed over.
    - **If the header says commits are behind it, the file describes a repo state that no longer exists.** Get the window before summarizing anything:
 
      ```bash
