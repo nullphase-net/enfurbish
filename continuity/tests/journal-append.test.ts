@@ -231,6 +231,19 @@ test("a close under another heading retires the action even when --tool filters 
   expect(r.stdout.split("\n")[0]).toMatch(/^0 open of 1/);
 });
 
+// The head already says `0 open`; a bare `open:` under the closed block said it again
+// with nothing beneath it (2026-10-01, --actions --tool guard-bash).
+test("with every action closed, the closed block ends without an empty open: label", () => {
+  const j = manyActions();
+  const id = idOf(cli(j, "--actions").stdout, "oldest idea");
+  closeWith(j, `#${id} done`, "toolA");
+  const out = cli(j, "--actions", "--tool", "toolA").stdout.trimEnd().split("\n");
+  expect(out[0]).toMatch(/^0 open of 1 · 1 closed/);
+  expect(out.at(-1)).toContain(`#${id} done`);
+  expect(out).not.toContain("open:");
+  expect(cli(j, "--actions").stdout).toContain("\nopen:\n");   // still there when rows follow it
+});
+
 test("a Closed line with no #id retires nothing, and the head says so", () => {
   const j = manyActions();
   closeWith(j, "the oldest idea is done");

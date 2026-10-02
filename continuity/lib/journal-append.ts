@@ -290,7 +290,8 @@ export function reportActions(secs: Section[], tool: string | undefined, limit: 
       "closed:",
       ...shownDone.map(c => row(c, false, full)),
       ...(done.length > shownDone.length ? [`+${done.length - shownDone.length} older closed`] : []),
-      "open:",
+      // The head already counts the open rows; a label with none under it says so twice.
+      ...(acts.length ? ["open:"] : []),
     ] : []),
     ...recent.map(a => row(a, true, full)),
     ...(hidden > 0 ? [`+${hidden} older`] : []),
