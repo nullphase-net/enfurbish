@@ -1,0 +1,84 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>enfurbish banner</title>
+<!-- The README's top image. The hook lines are real systemMessage output from a
+     throwaway project; the two replies under them are illustrative. Render:
+     chrome --headless=new --hide-scrollbars --force-device-scale-factor=2 \
+       --window-size=1280,640 --screenshot=banner.png banner.html -->
+<style>
+  :root { --bg:#0d1117; --win:#161b22; --bar:#010409; --line:#30363d;
+          --text:#e6edf3; --body:#9aa4af; --faded:#6e7681;
+          --continuity:#3ba55d; --affirm:#e3b341; --pastiche:#e07fe0; }
+  * { margin:0; box-sizing:border-box; }
+  html, body { width:1280px; height:640px; overflow:hidden; }
+  body { display:flex; gap:40px; padding:56px 48px 56px 64px; color:var(--text);
+         font-family:-apple-system, "SF Pro Display", "Helvetica Neue", sans-serif;
+         background:
+           radial-gradient(700px 500px at 90% 8%, rgba(88,166,255,.12), transparent 70%),
+           radial-gradient(600px 500px at 0% 100%, rgba(224,127,224,.08), transparent 70%),
+           var(--bg); }
+  .mono { font-family:"Fira Code", Menlo, monospace; }
+  .left { flex:0 0 470px; display:flex; flex-direction:column; justify-content:center; }
+  header { display:flex; align-items:center; gap:18px; }
+  .mark { width:80px; height:80px; flex:none; }
+  h1 { font:600 68px/1 "Fira Code", Menlo, monospace; letter-spacing:-2px; }
+  .stripe { display:flex; gap:6px; margin:24px 0 30px; }
+  .stripe i { flex:1; height:6px; border-radius:3px; }
+  .tag { font-size:31px; line-height:1.22; font-weight:600; letter-spacing:-.3px; }
+  .sub { margin-top:16px; font-size:20px; line-height:1.45; color:var(--body); }
+  .names { margin-top:26px; font-size:17px; word-spacing:8px; }
+  .install { margin-top:30px; align-self:flex-start; font-size:14px; padding:10px 14px;
+             border:1px solid var(--line); border-radius:10px; background:var(--win); }
+  .install b { color:var(--faded); font-weight:400; }
+  .term { flex:1; align-self:center; background:var(--win); border:1px solid var(--line);
+          border-radius:14px; box-shadow:0 24px 60px rgba(0,0,0,.5); overflow:hidden; }
+  .bar { height:38px; display:flex; align-items:center; gap:8px; padding:0 16px;
+         background:var(--bar); border-bottom:1px solid var(--line); }
+  .bar i { width:12px; height:12px; border-radius:50%; }
+  pre { padding:16px 18px 20px; font:13px/1.55 "Fira Code", Menlo, monospace;
+        color:var(--body); white-space:pre-wrap; }
+  pre .p { color:var(--faded); }
+  pre .u { color:var(--text); }
+  .c { color:var(--continuity); } .a { color:var(--affirm); } .s { color:var(--pastiche); }
+</style></head>
+<body>
+  <div class="left">
+    <header>
+      <svg class="mark" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+        <g transform="translate(60, 60) scale(0.96, 1.0) translate(-60, -60)">
+          <g fill="black">
+            <path fill-rule="evenodd" d="M 60,19 A 36,41 0 1 1 60,101 A 36,41 0 1 1 60,19 Z M 60,28 A 22,32 0 1 0 60,92 A 22,32 0 1 0 60,28 Z" />
+            <rect x="54" y="5" width="12" height="110" rx="3" />
+            <rect x="54" y="5" width="12" height="110" rx="3" transform="rotate(45, 60, 60)" />
+          </g>
+          <g fill="#58a6ff">
+            <path fill-rule="evenodd" d="M 60,20 A 35,40 0 1 1 60,100 A 35,40 0 1 1 60,20 Z M 60,27 A 23,33 0 1 0 60,93 A 23,33 0 1 0 60,27 Z" />
+            <rect x="55" y="6" width="10" height="108" rx="2" />
+            <rect x="55" y="6" width="10" height="108" rx="2" transform="rotate(45, 60, 60)" />
+          </g>
+        </g>
+      </svg>
+      <h1>enfurbish</h1>
+    </header>
+    <div class="stripe"><i style="background:var(--continuity)"></i><i style="background:var(--affirm)"></i><i style="background:var(--pastiche)"></i></div>
+    <div class="tag">Get more from your Claude&nbsp;Code sessions</div>
+    <div class="sub">/wrap and /next carry context across sessions, /affirm keeps you in charge of instruction files, and pastiche builds vocabulary in a second language as&nbsp;you&nbsp;work.</div>
+    <div class="names mono"><span class="c">continuity</span> <span class="a">affirm</span> <span class="s">pastiche</span></div>
+    <div class="install mono"><b>&gt;</b> /plugin marketplace add nullphase-net/enfurbish</div>
+  </div>
+  <div class="term">
+    <div class="bar"><i style="background:#f85149"></i><i style="background:#e3b341"></i><i style="background:#3ba55d"></i></div>
+<pre><span class="p">$</span> <span class="u">claude</span>
+<span class="c">Continuity:</span> NEXT_SESSION.md present from your last wrap (modified 14h ago). Run /next to pick it up.
+<span class="a">Affirm:</span> instruction files in scope:
+  ✧ CLAUDE.md  <span class="a">[CHANGED — unaffirmed]</span>
+      modified 3h ago · contrib, 2026-10-05T13:27:28Z
+
+⚠ Review unaffirmed files, then run /affirm.
+
+<span class="p">&gt;</span> <span class="u">/next</span>
+<span class="u">●</span> One thread open from last session: retry a station that times out.
+
+<span class="p">&gt;</span> <span class="u">go</span>
+<span class="u">●</span> A timeout drops the reading today. A retry (<span class="s">el reintento</span>) with backoff keeps it, and the station's id goes in the log line.</pre>
+  </div>
+</body></html>

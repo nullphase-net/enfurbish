@@ -1,5 +1,7 @@
 # enfurbish
 
+![enfurbish: continuity's and affirm's session-start banners in a terminal, and a reply that carries one of pastiche's terms](docs/banner.png)
+
 Claude Code plugins.
 
 Each plugin lives in a sibling directory at the repo root with its own manifest, README, and tests. There is no top-level manifest tying them together — each ships and installs independently.
