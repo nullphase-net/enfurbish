@@ -475,10 +475,16 @@ test("--since names another branch's commits after the header, with its worktree
   const p = join(root, "NEXT_SESSION.md");
   writeFileSync(p, HANDOFF("2026-08-18T20:00:00-05:00"));
   const where = relative(realpathSync(root), realpathSync(side));
-  expect(windowSince(root, p)).toBe(
+  const [head, ...subjects] = windowSince(root, p).split("\n");
+  expect(head).toBe(
     `0 commits since 2026-08-18T20:00:00-05:00 — HEAD has not moved, but other branches have · other branches since the header: side +1 [${where}]`);
+  // A count says work landed, not which thread it closes: the subjects follow, as HEAD's do.
+  expect(subjects).toHaveLength(1);
+  expect(subjects[0]).toMatch(/^  side: [0-9a-f]{7,}  2026-08-18T21:00:00-05:00$/);
   writeFileSync(p, HANDOFF("2026-08-18T17:00:00-05:00"));
-  expect(windowSince(root, p).split("\n")[0]).toEndWith(` since 2026-08-18T17:00:00-05:00 · other branches since the header: side +2 [${where}]`);
+  const window = windowSince(root, p).split("\n");
+  expect(window[0]).toEndWith(` since 2026-08-18T17:00:00-05:00 · other branches since the header: side +2 [${where}]`);
+  expect(window.filter(l => l.startsWith("  side: "))).toHaveLength(2);
   writeFileSync(p, HANDOFF("2026-08-18T22:00:00-05:00"));
   expect(windowSince(root, p)).toBe("0 commits since 2026-08-18T22:00:00-05:00 — handoff still describes HEAD");
 });

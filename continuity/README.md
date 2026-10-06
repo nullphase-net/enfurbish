@@ -70,7 +70,7 @@ straight back. Both counts read HEAD, so when HEAD sits behind the default branc
 the window both end with `HEAD <branch> is N commits behind main; its commits are not counted`.
 Any other branch HEAD lacks counted nowhere either, so the window names each one with commits after
 the header and the worktree holding it (`other branches since the header: fix/x +8 [../repo-fix]`),
-and `0 commits` then reads `HEAD has not moved, but other branches have` instead of the all-clear.
+lists those commits' subjects under HEAD's, and `0 commits` then reads `HEAD has not moved, but other branches have` instead of the all-clear.
 The listing prints the live layout under its head line, `branches vs main: ahead fix/x +8
 [../repo-fix] · merged old`, so a handoff need not carry one: a typed layout goes stale.
 

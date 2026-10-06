@@ -349,9 +349,12 @@ export function headLag(root: string): string {
  * #6906f2). Per-branch `rev-list`, not `%(ahead-behind:)`: that atom needs git
  * 2.41, and the git Apple ships is older.
  */
+export type Branch = { name: string; n: number; where: string };
+const shownAs = (b: Branch) => `${b.name}${b.n ? ` +${b.n}` : ""}${b.where}`;
+
 export function branchesAhead(
   root: string, against: string, opts: { since?: string; skip?: string } = {},
-): { ahead: string[]; merged: string[] } | null {
+): { ahead: Branch[]; merged: Branch[] } | null {
   const git = gitIn(root);
   const refs = git("for-each-ref", "refs/heads", "--format=%(refname:short)%00%(worktreepath)");
   if (refs.status !== 0) return null;
@@ -359,16 +362,16 @@ export function branchesAhead(
   let top = root;
   try { top = realpathSync(root); } catch { /* relative to the root as given */ }
   const vs = against === "HEAD" ? "HEAD" : `refs/heads/${against}`;
-  const ahead: string[] = [];
-  const merged: string[] = [];
+  const ahead: Branch[] = [];
+  const merged: Branch[] = [];
   for (const rec of refs.stdout.split("\n").filter(Boolean)) {
     const [name, wt] = rec.split("\0");
     if (name === against || name === opts.skip) continue;
     const where = wt ? ` [${relative(top, wt) || "."}]` : "";
     const since = opts.since ? [`--since=${opts.since}`] : [];
     const n = Number.parseInt(git("rev-list", "--count", ...since, `refs/heads/${name}`, "--not", vs).stdout ?? "", 10);
-    if (n > 0) ahead.push(`${name} +${n}${where}`);
-    else if (n === 0) merged.push(`${name}${where}`);
+    if (n > 0) ahead.push({ name, n, where });
+    else if (n === 0) merged.push({ name, n, where });
   }
   return { ahead, merged };
 }
@@ -388,7 +391,7 @@ export function layout(root: string): string {
   const base = baseBranch(root);
   const b = base ? branchesAhead(root, base) : null;
   if (!base || !b || (!b.ahead.length && !b.merged.length)) return "";
-  return `branches vs ${base}: ${b.ahead.length ? `ahead ${listed(b.ahead)}` : "none ahead"}${b.merged.length ? ` · merged ${listed(b.merged)}` : ""}`;
+  return `branches vs ${base}: ${b.ahead.length ? `ahead ${listed(b.ahead.map(shownAs))}` : "none ahead"}${b.merged.length ? ` · merged ${listed(b.merged.map(shownAs))}` : ""}`;
 }
 
 export function collect(
@@ -513,7 +516,14 @@ export function windowSince(root: string, path: string, limit = 25): string {
   // is behind it, which already names it.
   const others = branchesAhead(root, "HEAD", { since: iso, skip: lag ? baseBranch(root) : undefined });
   const othersNote = others === null ? " · other branches unknown"
-    : others.ahead.length ? ` · other branches since the header: ${listed(others.ahead)}` : "";
+    : others.ahead.length ? ` · other branches since the header: ${listed(others.ahead.map(shownAs))}` : "";
+  // Their subjects, as HEAD's are listed: a count says work landed, not which open
+  // thread it closes. Both dry runs that got only `+2` ran their own `git log` for it.
+  const otherLines = (others?.ahead ?? []).slice(0, 8).flatMap(b => {
+    const log = git("log", "--pretty=%h  %s", `--since=${iso}`, `refs/heads/${b.name}`, "--not", "HEAD");
+    const subjects = log.status === 0 ? log.stdout.split("\n").filter(l => l.trim()) : [];
+    return [...subjects.slice(0, 5).map(l => `  ${b.name}: ${l}`), ...(b.n > 5 ? [`  ${b.name}: +${b.n - 5} older`] : [])];
+  });
 
   // Uncommitted work counts. A session that ended without a wrap is as likely to
   // have left the tree dirty as to have committed, and this repo demonstrated it:
@@ -552,7 +562,7 @@ export function windowSince(root: string, path: string, limit = 25): string {
     const verdict = dirty === null ? "git status failed, so whether it still describes the tree is unknown"
       : dirty ? "handoff predates uncommitted work"
       : others?.ahead.length ? "HEAD has not moved, but other branches have" : "handoff still describes HEAD";
-    return `0 commits since ${iso}${dirtyNote} — ${verdict}${othersNote}${lagNote}`;
+    return [`0 commits since ${iso}${dirtyNote} — ${verdict}${othersNote}${lagNote}`, ...otherLines].join("\n");
   }
 
   const names = git("log", "--name-only", "--pretty=format:", `--since=${iso}`);
@@ -577,6 +587,7 @@ export function windowSince(root: string, path: string, limit = 25): string {
     ...edit,
     ...shown.map(c => `  ${c}`),
     ...(commits.length > shown.length ? [`  +${commits.length - shown.length} older`] : []),
+    ...otherLines,
   ];
   if (files === null) out.push("files: unknown (git log --name-only failed)");
   else {
