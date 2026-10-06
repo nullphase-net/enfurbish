@@ -94,7 +94,8 @@ bun run lib/pastiche.ts --seen "teuk"              # used it — restamp to toda
 bun run lib/pastiche.ts --mark "teuk"              # used it right — ✓ and restamp
 bun run lib/pastiche.ts --add km "ទឹក (teuk) — water" "family, food"
 bun run lib/pastiche.ts --add km - "rf, hardware"  # ...or several, one per stdin line
-bun run lib/pastiche.ts --tag "teuk" "family, food"   # tag something already there
+bun run lib/pastiche.ts --add es -                 # a line ending "[concurrency]" is tagged alone
+bun run lib/pastiche.ts --tag "teuk" "family, food"   # set its subject, replacing the old one
 bun run lib/pastiche.ts --correct es "costa" "cuesta" "costar is o→ue, stressed forms only"
 bun run lib/pastiche.ts --dedupe                   # merge each term's copies into one line
 bun run lib/pastiche.ts --path                     # resolved ledger path
@@ -144,11 +145,18 @@ the two differ.
 
 `--seen`, `--mark` and `--tag` name a term the same way, and every line of that term moves
 together. The exact term wins (`la red` moves `la red`, not `la redirección` or `la red
-interna`); failing that, a fragment of exactly one term's text resolves to it (`teuk`); a
+interna`); failing that, the term without the punctuation at its edges (`ve` names `¡ve!`,
+where as a fragment it was in 91 terms); failing that, a fragment of exactly one term's text
+resolves to it (`teuk`); a
 fragment spanning several terms is reported as ambiguous with the candidates, and nothing is
 written. Until 0.8.0 the needle was a substring of the whole line: replaying 54 real calls, 7
 restamped 16 lines of *other* terms, moving them out of the due list unused, and a mark on
 `អរគុណ (arkun)` left its `(arkun / awkun)` copy due. A needle may also lead with its language, as every due line does: `--seen "es: la red — network"` resolves to `la red` in Spanish only, so a due line pasted back whole works.
+
+A batch's one subject tags every line it adds, and every repeat it restamps that has no
+subject yet. A line that ends in brackets, `el hilo — thread [concurrency]`, the shape the due
+list prints, takes that subject instead: one batch subject once tagged a repeat with the
+subject meant for the line after it.
 
 Bare `--add <code>` with no body is still arg misuse (exit 2), not a blocking read on a tty —
 the `-` is required to ask for stdin.

@@ -299,16 +299,31 @@ function tagLine(l: string, subject: string): string {
  * mark on `អរគុណ (arkun)` left `អរគុណ (arkun / awkun)` due, and replaying 54
  * real calls, 7 restamped 16 lines of other terms — `la red` moved
  * `la redirección` and `la redundancia` out of the due list unused.
+ *
+ * Between the two, the exact term with its edge punctuation dropped, when that
+ * names one term: `ve` is `¡ve!`, and as a substring it is in 91 terms (#46f0f6).
  */
 export function matchingLines(text: string, needle: string): string[] {
   const [entries, bare] = scope(parseLedger(text), needle);
   const want = termKey(bare);
   let key: string | undefined = entries.some(e => termKey(e.term) === want) ? want : undefined;
+  if (key === undefined && unpunctuated(want)) {
+    const terms = [...new Set(entries.map(e => termKey(e.term)).filter(k => unpunctuated(k) === unpunctuated(want)))];
+    if (terms.length === 1) key = terms[0];
+  }
   if (key === undefined) {
     const terms = termsContaining(entries, bare);
     if (terms.length === 1) key = terms[0];
   }
   return key === undefined ? [] : entries.filter(e => termKey(e.term) === key).map(e => e.line);
+}
+
+/**
+ * A term without the punctuation at its edges: `¡ve!` → `ve`. Marks (`\p{M}`) are
+ * kept, because a Khmer word ends in a vowel sign: `ញ៉ាំ` is ញ plus three of them.
+ */
+function unpunctuated(key: string): string {
+  return key.replace(/^[^\p{L}\p{M}\p{N}]+|[^\p{L}\p{M}\p{N}]+$/gu, "");
 }
 
 /** The distinct terms whose text contains `needle`, in ledger order. */
@@ -502,8 +517,9 @@ Write the ledger with these, never by editing the file — they own the format:
   bun run $P --seen "<term>"                 # used it — rotates it out
   bun run $P --mark "<term>"                 # they used it right — ✓ and rotate
   bun run $P --add <code> "<term> — <gloss>" [subject]   # new or primed item; a repeat restamps
-  bun run $P --add <code> - [subject]        # ...or several, one per stdin line
-  bun run $P --tag "<term>" "<subject>"      # tag a term already in the ledger
+  bun run $P --add <code> - [subject]        # ...or several, one per stdin line;
+                                             #   "el hilo — thread [concurrency]" tags that line alone
+  bun run $P --tag "<term>" "<subject>"      # set a term's subject, replacing the old one
   bun run $P --correct <code> "<wrong>" "<right>" "<rule>"   # they corrected you`;
 }
 
@@ -604,8 +620,10 @@ const USAGE = `usage: pastiche.ts [--due <n>]
        --mark "<term>"              ✓ and restamp: they used it correctly
        --add <code> "<term> — <gloss>" [subject]
        --add <code> - [subject]     read one "<term> — <gloss>" per line from stdin;
-                                    one subject applies to the whole batch
-       --tag "<term>" "<subject>"   set what an existing term is about
+                                    the subject tags every line but one ending in
+                                    its own: "el hilo — thread [concurrency]"
+       --tag "<term>" "<subject>"   set what an existing term is about, replacing
+                                    the subject it had
        --correct <code> "<wrong>" "<right>" "<rule>"
        --dedupe                     merge each term's copies into one line
        --path`;
@@ -707,6 +725,7 @@ export function main(
     let bodies: string[];
     let marks: string | undefined;
     let subject: string | undefined;
+    let own: (string | undefined)[] = [];
     if (flag === "--correct") {
       // Three args rather than one composed string: if the session assembled
       // "<wrong> → <right> — <rule>" itself, the format would live in the prompt.
@@ -725,9 +744,12 @@ export function main(
       bodies = body === "-"
         ? stdin().split("\n").map(s => s.trim()).filter(Boolean)
         : [body];
-      // One subject for the whole batch: a session's additions are minted from
-      // one body of work, so they share its subject by construction.
+      // One subject for the whole batch, unless a line ends `[its own]`, the shape
+      // the due list prints: one batch subject tagged a restamped `la cadena` with
+      // the geography meant for the line after it (journal #404a39).
       subject = args[3];
+      own = bodies.map(b => /\s*\[([^[\]]+)\]$/.exec(b)?.[1].trim());
+      bodies = bodies.map(b => b.replace(/\s*\[[^[\]]+\]$/, ""));
     }
     if (!bodies.length) return out("stdin empty — nothing to add"), 0;
 
@@ -737,7 +759,8 @@ export function main(
     const skipped: string[] = [];
     const dupes: string[] = [];
     const date = today();
-    for (const b of bodies) {
+    for (const [i, b] of bodies.entries()) {
+      const subj = own[i] ?? subject;
       // The same term, by head — the part before the gloss — which catches a
       // reworded gloss the substring test below cannot see. It piled up as the
       // old comment here guessed: 69 terms duplicated, 168 redundant lines,
@@ -754,10 +777,10 @@ export function main(
         // that is --tag's job, and a batch's one subject is coarser than a term's
         // own. Until 0.10.1 a repeat dropped it and said nothing (2026-09-30).
         const had = hits.map(l => SUBJ.exec(l)?.[1].trim()).find(Boolean);
-        const fill = had ? undefined : subject;
+        const fill = had ? undefined : subj;
         const after = restampLines(text, hits, date, fill);
         const state = restampLines(text, hits, date) === text ? "already" : "restamped";
-        const note = fill ? "; tagged" : subject && had !== subject ? `; kept subj: ${had}` : "";
+        const note = fill ? "; tagged" : subj && had !== subj ? `; kept subj: ${had}` : "";
         dupes.push(
           `dupe: ${headOf(b)} ×${hits.length} — ${state} ${date}${note}`,
           // Whole: the stamp is at the end, and 305 of 668 real lines ran past a 96-char cut.
@@ -769,7 +792,7 @@ export function main(
       // The body is on disk but under no line with this language and head — a
       // gloss mention, another language — so there is no term to restamp.
       if (text.includes(b)) { skipped.push(b); continue; }
-      const line = formatEntry(code, b, date, marks, subject);
+      const line = formatEntry(code, b, date, marks, subj);
       text = text && !text.endsWith("\n") ? `${text}\n${line}\n` : `${text}${line}\n`;
       added.push(line);
     }

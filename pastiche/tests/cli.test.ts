@@ -210,6 +210,33 @@ describe("which lines a needle names", () => {
     expect(readFileSync(c.ledger, "utf8")).toContain(`to eat | 2026-01-01 | seen: ${NOW}`);
   });
 
+  // `--mark "ve"` read "ambiguous: 91 terms" on the live ledger (journal #46f0f6):
+  // the term is `¡ve!`, so the exact tier never fired and `ve` is in everything.
+  test("a term's edge punctuation does not stop its bare word naming it", () => {
+    const seed =
+      "- es: ¡ve! — go! (tú imperative of ir) | 2026-01-01 | seen: 2026-01-01\n" +
+      "- es: el nivel — level | 2026-01-01 | seen: 2026-01-01\n" +
+      "- km: ញ៉ាំ (nyam) — to eat | 2026-01-01 | seen: 2026-01-01\n" +
+      "- km: ញ៉ាំបាយហើយនៅ? (nyam bai haey nov?) — have you eaten? | 2026-01-01 | seen: 2026-01-01\n";
+    const c = fixture(seed);
+    main(["--mark", "ve"], c);
+    main(["--seen", "ញ៉ាំបាយហើយនៅ"], c);
+    // Khmer vowel signs are marks, not punctuation: a bare ញ stays ambiguous.
+    main(["--seen", "ញ"], c);
+    expect(readFileSync(c.ledger, "utf8")).toBe(seed
+      .replace("ir) | 2026-01-01 | seen: 2026-01-01", `ir) | 2026-01-01 | ✓ | seen: ${NOW}`)
+      .replace("eaten? | 2026-01-01 | seen: 2026-01-01", `eaten? | 2026-01-01 | seen: ${NOW}`));
+  });
+
+  test("an exact term still beats one that differs only in punctuation", () => {
+    const seed =
+      "- es: ¿qué? — what? | 2026-01-01 | seen: 2026-01-01\n" +
+      "- es: qué — what (relative) | 2026-01-01 | seen: 2026-01-01\n";
+    const c = fixture(seed);
+    main(["--seen", "qué"], c);
+    expect(readFileSync(c.ledger, "utf8")).toBe(seed.replace("(relative) | 2026-01-01 | seen: 2026-01-01", `(relative) | 2026-01-01 | seen: ${NOW}`));
+  });
+
   test("a fragment naming one term resolves to all of that term's lines", () => {
     const c = fixture(SPLIT);
     const said: string[] = [];
@@ -509,6 +536,27 @@ describe("--add with a subject", () => {
     const text = readFileSync(c.ledger, "utf8");
     expect(text).toContain(`- es: el consumo — power draw | ${NOW} | subj: gpu | seen: ${NOW}`);
     expect(text).toContain(`- es: el calor — heat | ${NOW} | subj: gpu | seen: ${NOW}`);
+  });
+
+  // One batch subject tagged every line, so a restamped `la cadena` took the
+  // geography meant for `la longitud` (journal #404a39).
+  test("a line ending in [subject] takes that subject over the batch's, new or repeat", () => {
+    const c = fixture("- es: la cadena — string, chain | 2026-01-01 | seen: 2026-01-01\n");
+    const out: string[] = [];
+    main(["--add", "es", "-", "geography"], c, s => void out.push(s),
+      () => "la cadena — string [programming]\nla longitud — longitude\nel río — river [geography, water]\n");
+    const text = readFileSync(c.ledger, "utf8");
+    expect(text).toContain(`- es: la cadena — string, chain | 2026-01-01 | subj: programming | seen: ${NOW}`);
+    expect(text).toContain(`- es: la longitud — longitude | ${NOW} | subj: geography | seen: ${NOW}`);
+    expect(text).toContain(`- es: el río — river | ${NOW} | subj: geography, water | seen: ${NOW}`);
+    expect(text).not.toContain("[");
+    expect(out).toContain("dupe: la cadena ×1 — restamped " + NOW + "; tagged");
+  });
+
+  test("a single --add reads a trailing [subject] the same way", () => {
+    const c = fixture(SEED);
+    main(["--add", "es", "el hilo — thread [concurrency]"], c, () => {});
+    expect(readFileSync(c.ledger, "utf8")).toContain(`- es: el hilo — thread | ${NOW} | subj: concurrency | seen: ${NOW}`);
   });
 
   test("omitting the subject still writes the old shape", () => {
