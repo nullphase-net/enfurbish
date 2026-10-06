@@ -15,7 +15,7 @@ Use when the user wants to pick up where the last session left off, or to re-con
    bun run "<skill-base-dir>/../../lib/handoffs.ts" --cwd "$(pwd)"
    ```
 
-   The report lists every `NEXT_SESSION.md` under the project root, newest first, `*` on the newest and `[local]` on the one in the current cwd. Read the header line before anything else — it names the count, how far behind the local pointer is when it is not the newest, and how many commits have landed since the newest handoff was written.
+   The report lists every `NEXT_SESSION.md` under the project root, newest first, `*` on the newest and `[local]` on the one in the current cwd. Read the header line before anything else — it names the count, how far behind the local pointer is when it is not the newest, and how many commits have landed since the newest handoff was written. A `branches vs <base>:` line under it is the live branch and worktree layout: where the handoff describes branches or worktrees, this line wins.
 
 2. **Read the pointer the report marks `*`.** Not the local one, unless they are the same file. Cwd varies between sessions in one project — an autonomous run in a subdirectory writes its own handoff — and reading the cwd-local file because it was closest is what cost a session real turns on 2026-08-18.
    - If the local file is not the newest, say so in one line before summarizing: which file you read, and how much staler the local one is.

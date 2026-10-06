@@ -10,7 +10,7 @@ For each name in the scan's `skills_invoked`, each key in `mcp`, each event in `
 bun run "<skill-base-dir>/../../lib/journal-append.ts" --journal ~/.claude/tooling-journal.md --recent <toolname>
 ```
 
-The last few verdicts per tool, so patterns show ("same 0% hit rate as prior 5 sessions") instead of evaluating cold. It matches names loosely and reports how many spellings it found; headings are free text and they drift. Don't substitute a `grep`.
+The last few verdicts per tool, so patterns show ("same 0% hit rate as prior 5 sessions") instead of evaluating cold. It matches names loosely and reports how many spellings it found; headings are free text and they drift. Don't substitute a `grep`. Body lines clip at 100 characters; rerun one tool with `--full` when a clipped line is the one you need.
 
 Then the standing backlog, once:
 

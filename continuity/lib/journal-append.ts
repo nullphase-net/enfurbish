@@ -341,13 +341,23 @@ export function keptOpen(added: Section[]): string[] {
   });
 }
 
-export function reportRecent(secs: Section[], tool: string, limit: number): string {
+/**
+ * Body lines clip at 100 like `--actions` rows, headings never (the verdict ends
+ * one). Whole sections made wrap step 2's seven calls 30.3 KB, which the harness
+ * spilled to a file (#ff85f5); clipped, the same seven read 12 KB here.
+ */
+export function reportRecent(secs: Section[], tool: string, limit: number, full = false): string {
   const hit = matching(secs, tool);
   const head = `${hit.length} section${hit.length === 1 ? "" : "s"} · "${tool}" · ${spellings(hit)} spellings · showing last ${Math.min(limit, hit.length)}`;
   if (hit.length === 0) return head;
+  let clipped = false;
   const shown = hit.slice(-limit).reverse()
-    .map(s => [`### ${s.heading}   [${s.entry.slice(0, 10)}]`, ...s.body.filter(l => l.trim())].join("\n"));
-  return [head, "", ...shown].join("\n");
+    .map(s => [`### ${s.heading}   [${s.entry.slice(0, 10)}]`, ...s.body.filter(l => l.trim()).map(l => {
+      if (full || l.length <= 100) return l;
+      clipped = true;
+      return clip(l, 100);
+    })].join("\n"));
+  return [head + (clipped ? " · lines clipped at 100, --full for whole" : ""), "", ...shown].join("\n");
 }
 
 // --- CLI -------------------------------------------------------------------
@@ -375,7 +385,8 @@ const USAGE = `usage: journal-append.ts --journal <path> [mode]
                                    open next, oldest still-open under 'stale:' with
                                    what to do about them; <name> (or --tool <name>)
                                    filters to one tool, --full prints whole text
-       --recent <name>             what prior wraps said about one tool
+       --recent <name>             what prior wraps said about one tool, lines
+                                   clipped at 100; --full prints them whole
        --limit <n>                 cap rows (default 20 actions / 5 sections;
                                    closed rows stop at 20 whatever <n> is)`;
 
@@ -399,7 +410,7 @@ if (import.meta.main) {
     const limit = Number.parseInt(args.limit || "", 10);
     const secs = parseSections(read());
     process.stdout.write(("recent" in args
-      ? reportRecent(secs, args.recent, Number.isFinite(limit) ? limit : 5)
+      ? reportRecent(secs, args.recent, Number.isFinite(limit) ? limit : 5, "full" in args)
       // `--actions ponytail` parses "ponytail" as the value of --actions. Read only
       // --tool and it vanished: the whole backlog, exit 0, no scope in the head.
       : reportActions(secs, args.tool || args.actions || undefined, Number.isFinite(limit) ? limit : 20, "full" in args)) + "\n");

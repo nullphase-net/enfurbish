@@ -111,6 +111,22 @@ test("--recent with a real tool name still reports", () => {
   expect(r.stdout).toContain("pastiche");
 });
 
+// Whole sections made wrap step 2's seven calls 30.3 KB (#ff85f5). A body line
+// clips, the heading (whose end is the verdict) never does, and --full undoes it.
+test("--recent clips long body lines, never the heading, and says so; --full prints them whole", () => {
+  const j = seeded();
+  const long = "x".repeat(150);
+  writeFileSync(j, SECTIONS.replace("- a note", `- ${long}`).replace("verdict: helped", `${"y".repeat(120)} verdict: helped`));
+  const clipped = cli(j, "--recent", "pastiche").stdout;
+  expect(clipped).toContain("lines clipped at 100, --full for whole");
+  expect(clipped).not.toContain(long);
+  expect(clipped).toContain(`${"y".repeat(120)} verdict: helped`);
+  const whole = cli(j, "--recent", "pastiche", "--full").stdout;
+  expect(whole).toContain(long);
+  expect(whole).not.toContain("clipped");
+  expect(cli(seeded(), "--recent", "pastiche").stdout).not.toContain("clipped");
+});
+
 // `--actions ponytail` parsed "ponytail" as the value of --actions, and the report
 // read only --tool: the whole backlog came back, exit 0, with no scope in the head.
 // A reader has no way to tell that from a correct answer. Both directions.

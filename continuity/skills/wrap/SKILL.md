@@ -51,6 +51,7 @@ Reconcile the one in *this* cwd. A newer sibling is another session's pointer, n
 
 - `newest N commits behind` / `+N commits`: the repo moved after the pointer was written, which is how a resolved item sits in it unmarked. 5.2 needs this number. A high count beside `stamp:assistant` is the normal shape of a session that ended without wrapping: untouched and out of date at the same time.
 - `+Nh Nm after header`: the content moved after its own `**Last wrapped:**` line; trust the content over the header. `header Nh ahead of file` is the same comparison failing the other way: the header is wrong, and so is every window derived from it.
+- `branches vs <base>:` the live branch and worktree layout. The new file need not copy it: a copied layout goes stale, and the next `--cwd` prints it again.
 - `oversize:NNKB`: past 16 KB. Trim during the merge, dropping resolved threads and collapsing narrated ones. This is the last moment anything can.
 
 **5.1 Ask who last wrote it.**

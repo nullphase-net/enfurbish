@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { CHECK_RESULTS, checkReport, collect, commitsSince, formatHeader, generation, listRetros, main, ownership, ownershipSince, report, retroReport, scanForNextSessionsWithStats, stamp, windowSince } from "../lib/handoffs";
 import { spawnSync } from "node:child_process";
 import { gitInitClean } from "./helpers/git";
@@ -446,9 +446,61 @@ test("--cwd and --since say when HEAD is behind main, and stay silent on main", 
   const lag = "HEAD wip is 2 commits behind main; its commits are not counted";
   expect(run("--cwd", root)).toEndWith(` · ${lag}`);
   expect(run("--since", join(root, "NEXT_SESSION.md"))).toEndWith(` · ${lag}`);
+  expect(run("--since", join(root, "NEXT_SESSION.md"))).not.toContain("other branches");   // main is the lag's to name
   mkdirSync(join(root, "early"));
   writeFileSync(join(root, "early", "NEXT_SESSION.md"), HANDOFF("2026-08-18T15:00:00-05:00"));
   expect(run("--since", join(root, "early", "NEXT_SESSION.md"))).toEndWith(` · ${lag}`);   // the window with commits in it
+});
+
+function commitAt(cwd: string, iso: string) {
+  writeFileSync(join(cwd, "g.txt"), iso);
+  spawnSync("git", ["add", "-A"], { cwd });
+  spawnSync("git", ["commit", "-q", "-m", iso], { cwd, env: { ...process.env, GIT_COMMITTER_DATE: iso, GIT_AUTHOR_DATE: iso } });
+}
+
+/** COMMITS on main, plus `side` checked out in a sibling worktree with one commit at each of `sideAt`. */
+function repoWithSide(sideAt: string[]): { root: string; side: string } {
+  const root = repoWithCommits(COMMITS);
+  const side = `${root}-side`;
+  spawnSync("git", ["worktree", "add", "-q", "-b", "side", side], { cwd: root });
+  for (const iso of sideAt) commitAt(side, iso);
+  return { root, side };
+}
+
+// A worktree flow commits on a branch HEAD never sees: 7 commits on a sibling
+// worktree's branch read as "handoff predates uncommitted work" and nothing more
+// (2026-10-06, journal #6906f2).
+test("--since names another branch's commits after the header, with its worktree, and drops the all-clear", () => {
+  const { root, side } = repoWithSide(["2026-08-18T19:30:00-05:00", "2026-08-18T21:00:00-05:00"]);
+  const p = join(root, "NEXT_SESSION.md");
+  writeFileSync(p, HANDOFF("2026-08-18T20:00:00-05:00"));
+  const where = relative(realpathSync(root), realpathSync(side));
+  expect(windowSince(root, p)).toBe(
+    `0 commits since 2026-08-18T20:00:00-05:00 — HEAD has not moved, but other branches have · other branches since the header: side +1 [${where}]`);
+  writeFileSync(p, HANDOFF("2026-08-18T17:00:00-05:00"));
+  expect(windowSince(root, p).split("\n")[0]).toEndWith(` since 2026-08-18T17:00:00-05:00 · other branches since the header: side +2 [${where}]`);
+  writeFileSync(p, HANDOFF("2026-08-18T22:00:00-05:00"));
+  expect(windowSince(root, p)).toBe("0 commits since 2026-08-18T22:00:00-05:00 — handoff still describes HEAD");
+});
+
+// A typed layout "verified at this wrap" named 4 of 5 worktrees and 4 of 11
+// branches (journal #3bd2c3); --cwd prints the live one instead.
+test("--cwd prints each branch beside the default one, ahead or merged, with its worktree", () => {
+  const { root, side } = repoWithSide(["2026-08-18T21:00:00-05:00"]);
+  writeFileSync(join(root, "NEXT_SESSION.md"), HANDOFF("2026-08-18T20:00:00-05:00"));
+  spawnSync("git", ["branch", "old", "HEAD~1"], { cwd: root });
+  let out = "";
+  main(["--cwd", root], Date.parse("2026-08-18T22:00:00-05:00"), s => { out = s; });
+  const where = relative(realpathSync(root), realpathSync(side));
+  expect(out.split("\n")[1]).toBe(`branches vs main: ahead side +1 [${where}] · merged old`);
+  spawnSync("git", ["checkout", "-q", "old"], { cwd: root });   // measured against main, not HEAD
+  main(["--cwd", root], Date.parse("2026-08-18T22:00:00-05:00"), s => { out = s; });
+  expect(out.split("\n")[1]).toBe(`branches vs main: ahead side +1 [${where}] · merged old [.]`);
+
+  const lone = repoWithCommits(COMMITS);
+  writeFileSync(join(lone, "NEXT_SESSION.md"), HANDOFF("2026-08-18T20:00:00-05:00"));
+  main(["--cwd", lone], Date.parse("2026-08-18T22:00:00-05:00"), s => { out = s; });
+  expect(out).not.toContain("branches vs");
 });
 
 // --- windowSince: the evidence for "which of these are already done?" -------
