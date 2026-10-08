@@ -19,16 +19,18 @@ function debugLog(line: string) {
  * Claude Code sends every hook a JSON payload on stdin. A manual run sends
  * none, and counts nothing: a count needs a session to dedupe on.
  */
-function readSessionId(): string | null {
+function readPayload(): { session_id?: unknown; pastiche_deferred?: unknown } {
   try {
-    const obj = JSON.parse(readFileSync(0, "utf8"));
-    return typeof obj?.session_id === "string" ? obj.session_id : null;
+    return JSON.parse(readFileSync(0, "utf8")) ?? {};
   } catch {
-    return null;
+    return {};
   }
 }
 
-export function buildOutput(pluginRoot: string, sessionId: string | null = null): string | null {
+/** The vocabulary prompt, and the due terms it lists as `<code>: <term>` for the mod's band. */
+export function buildOutput(
+  pluginRoot: string, sessionId: string | null = null,
+): { context: string; terms: string[] } | null {
   const cfg = loadConfig();
   // The gate is configured languages, not the ledger. With nothing to teach,
   // stay silent; with something to teach but no ledger yet, teach and let the
@@ -51,9 +53,12 @@ export function buildOutput(pluginRoot: string, sessionId: string | null = null)
       debugLog(`surfaced not saved: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  return buildContext({
-    cfg, due, rotated, untagged: untaggedCount(entries), notes: loadNotes(pluginRoot, cfg), pluginRoot,
-  });
+  return {
+    context: buildContext({
+      cfg, due, rotated, untagged: untaggedCount(entries), notes: loadNotes(pluginRoot, cfg), pluginRoot,
+    }),
+    terms: due.map(e => `${e.code}: ${e.term}`),
+  };
 }
 
 /**
@@ -109,10 +114,21 @@ if (import.meta.main) {
   // user nothing more than a session without vocabulary in it.
   try {
     const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || join(import.meta.dir, "..");
-    const context = buildOutput(pluginRoot, readSessionId());
+    const payload = readPayload();
+    const sessionId = typeof payload.session_id === "string" ? payload.session_id : null;
+    // The mod's call, made on the first prompt that is not a schedule's: the
+    // vocabulary as data, `{}` with nothing to teach.
+    if (process.argv.includes("--vocabulary")) {
+      process.stdout.write(JSON.stringify(buildOutput(pluginRoot, sessionId) ?? {}) + "\n");
+      process.exit(0);
+    }
+    // Set by the mod on its way down: it injects at that first prompt instead, so a
+    // session no person reads neither carries the vocabulary nor counts as shown it.
+    const deferred = payload.pastiche_deferred === true;
+    const context = deferred ? null : buildOutput(pluginRoot, sessionId)?.context ?? null;
     const stale = supersededNote(pluginRoot, process.env.CLAUDE_PROJECT_DIR || process.cwd());
     if (context === null && !stale) {
-      debugLog("no configured languages — emitting empty");
+      debugLog(deferred ? "deferred to the mod — emitting empty" : "no configured languages — emitting empty");
       process.stdout.write("{}\n");
     } else {
       debugLog(`injected ${context?.length ?? 0} chars${stale ? " + stale-copy note" : ""}`);

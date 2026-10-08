@@ -1,0 +1,5 @@
+# A mod test (`<plugin>/hooks/*.test.ts`) runs under `claude plugin test <plugin>`,
+# which collects every *.test.ts in the plugin; its kit does not load under Bun.
+# So a plugin with a mod names its Bun tests *.spec.ts, and Bun skips the mod's.
+[test]
+pathIgnorePatterns = ["**/hooks/*.test.ts"]

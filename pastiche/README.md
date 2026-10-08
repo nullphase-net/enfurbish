@@ -1,6 +1,6 @@
 # pastiche
 
-Ambient language learning inside Claude Code. A `SessionStart` hook reads your vocabulary
+Ambient language learning inside Claude Code. pastiche reads your vocabulary
 ledger, picks the items you have gone longest without seeing, and asks the session to weave
 them into ordinary work — a few terms tied to whatever you are actually doing, plus a recap
 in the target language with its English translation when something finishes.
@@ -81,6 +81,24 @@ intervals and no ease factors.
 
 Marks accumulate and are never decayed. A line with four ✓ on it is a line you have used
 four times, not a claim about how well you know it now — `seen:` is what drives selection.
+
+## Loops and the band
+
+On Claude Code 2.1.287 or later, pastiche also loads a mod, code that runs inside Claude
+Code. It does two things.
+
+It holds the vocabulary back until the first prompt a schedule did not fire. A session
+driven by `/loop` or a routine never carries the terms and never counts as having been
+shown them, so a night of unattended loops does not rotate your due list. In a session you
+started and then left on a loop, each scheduled turn carries one line telling the model that
+nobody is reading and nothing should be written.
+
+It draws the due terms above the prompt, in the terminal and the desktop app, for the rest
+of the session. Collapse it with ctrl+x ctrl+a. Seeing a term there does not count as
+using it.
+
+Where mods do not load (an older Claude Code, or an organization that allows only its own),
+the `SessionStart` hook injects the vocabulary when the session starts, as before.
 
 ## Commands
 

@@ -9,3 +9,6 @@ NEXT_SESSION.md
 graphify-out/
 TODO.md
 .private/
+# Laid by Claude Code when a plugin loads from --plugin-dir; it extends the
+# engine-written .claude-plugin/types/ (which ignores itself) and sweeps in Bun files.
+*/tsconfig.json

@@ -16,11 +16,13 @@ function freshDir(): string {
 async function runHook(
   pasticheDir: string,
   sessionId?: string,
+  { args = [] as string[], deferred = false } = {},
 ): Promise<{ stdout: string; code: number }> {
-  const proc = Bun.spawn(["bun", "run", HOOK], {
+  const payload = { session_id: sessionId, ...(deferred ? { pastiche_deferred: true } : {}) };
+  const proc = Bun.spawn(["bun", "run", HOOK, ...args], {
     env: { ...process.env, PASTICHE_DIR: pasticheDir, CLAUDE_PLUGIN_ROOT: ROOT },
     // Claude Code hands every hook a JSON payload on stdin; a manual run has none.
-    stdin: sessionId === undefined ? "ignore" : new Blob([JSON.stringify({ session_id: sessionId })]),
+    stdin: sessionId === undefined ? "ignore" : new Blob([JSON.stringify(payload)]),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -193,6 +195,34 @@ describe("session-start hook", () => {
     const at = runs.length - 2; // the last of ids: its showing is the one that rotates teuk
     said.forEach((due, i) => expect(due.includes("rotated to back")).toBe(i === at));
     expect(said[at]).toContain(`rotated to back (shown in ${DORMANT_AFTER} sessions since last use): km: ទឹក (teuk)`);
+  });
+
+  // The mod sets the flag at SessionStart and injects at the first prompt that is
+  // not a schedule's, so a loop session neither carries the terms nor counts them.
+  test("a deferred SessionStart teaches nothing and counts nothing", async () => {
+    const dir = twoTerms();
+    for (let i = 0; i <= DORMANT_AFTER; i++) {
+      const { stdout, code } = await runHook(dir, `s${i}`, { deferred: true });
+      expect(code).toBe(0);
+      expect(JSON.parse(stdout)).toEqual({});
+    }
+    expect(dueOf((await runHook(dir, "next")).stdout)).toContain("teuk");
+  });
+
+  test("--vocabulary hands the mod the context and the due terms, and counts the session", async () => {
+    const dir = twoTerms();
+    for (let i = 0; i < DORMANT_AFTER; i++) {
+      const out = JSON.parse((await runHook(dir, `s${i}`, { args: ["--vocabulary"] })).stdout);
+      expect(out.terms).toEqual(["km: ទឹក (teuk) — water"]);
+      expect(out.context.split("Due for re-surfacing")[1]).toContain("teuk");
+    }
+    expect(dueOf((await runHook(dir, "next")).stdout)).not.toContain("teuk");
+  });
+
+  test("--vocabulary with nothing to teach answers {}", async () => {
+    const { stdout, code } = await runHook(freshDir(), "s0", { args: ["--vocabulary"] });
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({});
   });
 
   test("a run with no session id counts nothing", async () => {
