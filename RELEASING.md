@@ -41,9 +41,9 @@ If a change touches more than one plugin, version each one on its own and give e
 ## Steps
 
 1. Make the change. Add or update tests. `bun test` green.
-2. Bump `<plugin>/.claude-plugin/plugin.json` `version`.
+2. Bump `<plugin>/.claude-plugin/plugin.json` `version`. Replace the string literally: `jq '.version=$v'` reformats the file.
 3. Commit. Message: `<plugin> X.Y.Z: <short summary>` (matches the existing log shape — see `git log --oneline`).
-4. Tag the last commit of the release on `main` — the bump commit unless something landed after it. `git tag -a <plugin>-vX.Y.Z <commit> -m "<plugin> X.Y.Z — <one-line>"`; pass the sha explicitly rather than relying on where HEAD happens to sit.
+4. Tag the last commit of the release on `main` — the bump commit unless something landed after it. `git tag -a <plugin>-vX.Y.Z <commit> -m "<plugin> X.Y.Z — <one-line>"`; pass the sha explicitly rather than relying on where HEAD happens to sit. Tag by hand: `claude plugin tag` writes `<plugin>--v<version>`, double dash.
 5. Pin it: set that plugin's `ref` in `.claude-plugin/marketplace.json` to the new tag and commit. `claude plugin validate .` checks the file.
 6. Push branch and tag together: `git push --atomic origin main <plugin>-vX.Y.Z`.
 7. Install it from GitHub the way a user with no GitHub SSH key would. The config dir is a throwaway, and SSH is made keyless:
@@ -60,7 +60,7 @@ If a change touches more than one plugin, version each one on its own and give e
    ```
 
    The first two printed lines must match. The third prints the cleanup rather than running it: a delete whose target is a variable runs once as `echo` first. Check that it names the `mktemp -d` directory, then run it with that literal path. A clone error naming `git@github.com` means a `url` in `marketplace.json` is not the HTTPS form (see "What installs"). A clone error naming the tag means the push did not carry it. A version or sha that differs means the pin names a different tag, or the tagged commit was not bumped. `claude plugin validate .` passes in all three cases.
-8. On any machine running the plugin, run `claude plugin update <name>@enfurbish` (or `/plugin update`), then `/reload-plugins`. The installed copy is a snapshot under `cache/`, not a clone, and auto-update is off for a third-party marketplace unless someone turned it on, so nothing arrives until then.
+8. On any machine running the plugin, run `claude plugin update <name>@enfurbish` (or `/plugin update`), then `/reload-plugins`. The installed copy is a snapshot under `cache/`, not a clone, and auto-update is off for a third-party marketplace unless someone turned it on, so nothing arrives until then. `/reload-plugins` fires no `SessionStart`, so the note below stops at the next session start.
 
 Until step 8 runs, each plugin's `SessionStart` hook says so in any session whose cwd is this checkout (or the plugin's own directory in it): `continuity 0.11.0 is running, but this checkout has 0.12.0. …` on both channels. It compares the running copy's `plugin.json` against the checkout's, so it also fires after a checkout moves back to an older commit, and while a bump on `main` waits for its release. The checkout's `marketplace.json` tells those apart: `pinned as <tag>` means the release is cut and the update will install it once the pin and tag are pushed; `unreleased: marketplace.json pins <tag>` means steps 4–6 are still to do, and until the push the update answers "already at the latest version".
 
