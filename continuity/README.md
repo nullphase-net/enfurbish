@@ -54,10 +54,14 @@ A trailing `+N commits` means the repo moved on after the pointer was written, a
 repeats the count for the newest one. Age measures the file; that measures the code it describes,
 and the two come apart exactly when a handoff is most misleading.
 
-The other two markers are about the file itself. `header Nh ahead of file` is the reverse of
+The other markers are about the file itself. `header Nh ahead of file` is the reverse of
 `after header` and always a bug: a header cannot postdate the file it heads, and every window
 derived from one that does is short by exactly the error. `oversize:NNKB` means the pointer is
 past 16 KB — `/wrap` sees it before the merge, which is the last point anything can be trimmed.
+`dont-forget:N` means the `## Don't forget` section is past 12 bullets. Nothing else closes a
+bullet there: the merge keeps what it doubts, so a fact with no open thread behind it rides
+forward for good. The wrap writes no project doc, so it carries such a fact and names, in the
+retro, the doc it belongs in; the pile shrinks when you move them.
 
 `--since <path>` is the evidence behind that count — the commits and files that landed after the
 file's own header, plus how much is still uncommitted. It answers "which of these open threads are

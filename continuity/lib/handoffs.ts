@@ -28,6 +28,12 @@ const MAX_DEPTH = 4;
 // This project's own pointer reached 70 KB, +10 KB of it in one session under
 // `/wrap`'s hand, while the only complaint lived in the skill that reads the file.
 const OVERSIZE = 16 * 1024;
+// Nothing closes a `Don't forget` bullet: 5.2 keeps what it doubts, and a fact with
+// no open thread behind it rides forward for good. Measured 2026-10-06 over 29 local
+// handoffs: median 7 bullets, third quartile 11, this project's own 34 (20 of them
+// already in its docs). The marker fires past the quartile.
+const DONT_FORGET_MAX = 12;
+const DONT_FORGET = /^## Don['’]t forget\s*$/m;
 const IGNORE_DIRS = new Set([
   "node_modules", ".git", "vendor", "dist", "build", "target",
   "__pycache__", ".venv", "venv",
@@ -281,6 +287,8 @@ export type Handoff = {
   /** Bytes on disk. Only the writer can act on an oversized pointer, and `/wrap`
    *  reads this report before its merge — the last moment trimming is cheap. */
   size: number;
+  /** Top-level bullets under `## Don't forget`; the report marks the file past `DONT_FORGET_MAX`. */
+  dontForget: number;
 };
 
 /**
@@ -394,6 +402,19 @@ export function layout(root: string): string {
   return `branches vs ${base}: ${b.ahead.length ? `ahead ${listed(b.ahead.map(shownAs))}` : "none ahead"}${b.merged.length ? ` · merged ${listed(b.merged.map(shownAs))}` : ""}`;
 }
 
+/**
+ * Top-level bullets under `## Don't forget`, read to the next `## ` heading. The section has no close path of its own: `/wrap` 5.2 keeps what it
+ * doubts, so a fact with no open thread behind it rides forward until someone trims
+ * it, and this project's own section reached 34 before anyone did.
+ */
+export function dontForgetCount(text: string): number {
+  const m = DONT_FORGET.exec(text);
+  if (!m) return 0;
+  const rest = text.slice(m.index + m[0].length);
+  const end = rest.search(/^## /m);
+  return (end === -1 ? rest : rest.slice(0, end)).split("\n").filter(l => /^[-*] /.test(l)).length;
+}
+
 export function collect(
   sessionCwd: string,
   projectRoot: string,
@@ -415,6 +436,7 @@ export function collect(
         local: f.path === localPath,
         ownership: ownership(text),
         size: Buffer.byteLength(text),
+        dontForget: dontForgetCount(text),
       };
     })
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -462,7 +484,8 @@ export function report(hs: Handoff[], projectRoot: string, now: number, cut = 0,
     const own = h.ownership === "unstamped" ? "" : `  stamp:${h.ownership}`;
     const since = h.commitsSince ? `  +${plural(h.commitsSince)}` : "";
     const big = h.size > OVERSIZE ? `  oversize:${Math.round(h.size / 1024)}KB` : "";
-    return `${h === newest ? "*" : " "} ${name}  ${age} wrapped ${wrapped}${own}${drift}${since}${big}`;
+    const many = h.dontForget > DONT_FORGET_MAX ? `  dont-forget:${h.dontForget}` : "";
+    return `${h === newest ? "*" : " "} ${name}  ${age} wrapped ${wrapped}${own}${drift}${since}${big}${many}`;
   });
   return [head + pivot + behind + (lag ? ` · ${lag}` : ""), ...(branches ? [branches] : []), ...lines].join("\n");
 }

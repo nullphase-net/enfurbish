@@ -25,7 +25,7 @@ test("a scan cut short says so even when it found no handoff", () => {
 
 test("a scan cut short warns that a newer handoff may exist", () => {
   const h: Handoff = { path: "/p/NEXT_SESSION.md", rel: "NEXT_SESSION.md", mtimeMs: 0, wrapped: null,
-    commitsSince: null, local: true, ownership: "assistant", size: 1 };
+    commitsSince: null, local: true, ownership: "assistant", size: 1, dontForget: 0 };
   for (const channel of ["user", "model"] as const) {
     const msg = buildBanner({ sessionCwd: "/p", projectRoot: "/p", handoffs: [h], now: 1000, channel, cut: 1 })!;
     expect(msg).toEndWith(" The handoff scan stopped at its time budget with 1 dir under /p unsearched, so a newer handoff may exist.");
@@ -417,6 +417,7 @@ const HO = (over: Partial<Handoff> = {}): Handoff => ({
   local: true,
   ownership: "assistant",
   size: 512,
+  dontForget: 0,
   ...over,
 });
 

@@ -53,6 +53,7 @@ Reconcile the one in *this* cwd. A newer sibling is another session's pointer, n
 - `+Nh Nm after header`: the content moved after its own `**Last wrapped:**` line; trust the content over the header. `header Nh ahead of file` is the same comparison failing the other way: the header is wrong, and so is every window derived from it.
 - `branches vs <base>:` the live branch and worktree layout. The new file need not copy it: a copied layout goes stale, and the next `--cwd` prints it again.
 - `oversize:NNKB`: past 16 KB. Trim during the merge, dropping resolved threads and collapsing narrated ones. This is the last moment anything can.
+- `dont-forget:N`: that section is past 12 bullets. A bullet there guards an open thread; one that guards nothing is a durable fact with no home yet, and 5.3 says what to do with it.
 
 **5.1 Ask who last wrote it.**
 
@@ -100,13 +101,14 @@ One sentence on the most important thing to pick up.
 - Anything fragile or hard to reconstruct.
 ```
 
-Four authoring rules:
+Authoring rules:
 
 - Say in words when an item is untested: "untested lead", "not yet run". No special prefix; `/next` reads items semantically.
 - Every measured fact names the artifact that produced it, inline: a result file, a commit sha, a `file.py:symbol`.
 - Verify any claim the item makes about the repo before writing it: counts, remaining budget, whether a proposed experiment is still feasible. A number this session measured an hour ago is not verified; re-run it now.
 - An item that waits on a condition ("do X once Y lands") says whether Y has already happened as of writing. An unattended session obeys the condition as written.
 - When the scan's `worktree.before_session` is above zero, uncommitted work has already outlived a session. Put `worktree.summary` under Don't forget, verbatim.
+- A Don't-forget bullet guards an open thread, or a row in the tool the file delegates to. A fact that guards none belongs in a project doc, not in a file about what is open. The wrap writes no doc, so carry it and name it in the retro's Learnings with the doc it belongs in; the user moves it, and `--cwd` marks the section `dont-forget:N` past 12 bullets until they do. Dropping it is not an option: a 2026-08-16 session spent two days re-deriving a fact staged here.
 
 **5.4 Write or remove.** Any items → write. Empty after the merge → `rm <cwd>/NEXT_SESSION.md` and note "removed (all resolved)" in the Handoff section.
 

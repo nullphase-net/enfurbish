@@ -191,6 +191,29 @@ test("report marks a pointer past 16KB and stays quiet under it", () => {
   expect(report(collect(root, root), root, Date.now())).toContain("oversize:70KB");
 });
 
+// Nothing closes a `Don't forget` bullet: the merge keeps what it doubts, so a fact
+// with no open thread behind it rides forward for good. This project's own section
+// held 34 on 2026-10-06 against a median of 7 across 29 local handoffs. The marker
+// rides the report both skills read, like `oversize`.
+test("report marks a Don't-forget section past 12 bullets and stays quiet under it", () => {
+  const root = mkdtempSync(join(tmpdir(), "handoffs-"));
+  writeFileSync(join(root, "CLAUDE.md"), "# marker\n");
+  const p = join(root, "NEXT_SESSION.md");
+  const bullets = (n: number) => Array.from({ length: n }, (_, i) => `- fact ${i}`).join("\n");
+  // Bullets before the section and after it must not count.
+  const file = (n: number) =>
+    `# Next session — x\n\n## Open threads\n${bullets(20)}\n\n## Don't forget\n${bullets(n)}\n\n## Read first\n${bullets(20)}\n\n<!-- wrap-generation 0 -->\n`;
+
+  writeFileSync(p, file(12));
+  expect(report(collect(root, root), root, Date.now())).not.toContain("dont-forget");
+
+  writeFileSync(p, file(13));
+  expect(report(collect(root, root), root, Date.now())).toContain("dont-forget:13");
+
+  writeFileSync(p, `# x\n\n## Start here\n${bullets(40)}\n`);
+  expect(report(collect(root, root), root, Date.now())).not.toContain("dont-forget");
+});
+
 test("report on an empty project states the count rather than staying silent", () => {
   const root = mkdtempSync(join(tmpdir(), "handoffs-"));
   writeFileSync(join(root, "CLAUDE.md"), "# marker\n");
