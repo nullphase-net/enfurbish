@@ -194,6 +194,8 @@ export const FILES_CHANGED_CAP = 50;
  * evidence a path went untouched. `--ignored` was rejected: it would also list build
  * output and dependency dirs touched in the window. The instruction files are the
  * ones that matter, and /wrap already asks `affirm --since` about exactly those.
+ * Untracked paths that are not ignored are listed one file each (`-uall`), so each is
+ * judged by its own mtime; only an untracked embedded repo is still one `dir/` entry.
  *
  * RE-DATED COMMITS ARE FLAGGED, NOT DROPPED. `git log --since` reads the commit date,
  * and a rebase, amend or cherry-pick sets that to now while keeping the author date.
@@ -235,7 +237,11 @@ export function gitChangedSince(
     if (log.status !== 0) return false;
     // `--porcelain` is stable across git versions by contract; `-z` avoids the quoting
     // it applies to paths with spaces. XY status is the first two bytes, path the rest.
-    const dirty = git("status", "--porcelain", "-z");
+    // `-uall` lists each untracked file. By default git collapses an untracked dir to
+    // `dir/`, and the mtime below was then the dir's, which rewriting a file inside it
+    // never moves (2026-10-09: a skill dir dated 09-30, its SKILL.md rewritten in the
+    // session, files_changed empty). An embedded repo still collapses to `dir/`.
+    const dirty = git("status", "--porcelain", "-z", "-uall");
     // The list's contract is commits AND dirty work. Without the second half a
     // commits-only list reads as complete, so a failed status is "could not answer".
     if (dirty.status !== 0) return false;
@@ -374,7 +380,7 @@ function editsMiss(changed: string[], edited: string[], top: string): boolean {
   const have = edited.map(canonical);
   return changed.some(rel => {
     const abs = canonical(join(top, rel));
-    // git collapses an untracked directory to `dir/`; any edit inside it covers it.
+    // git collapses an untracked embedded repo to `dir/`; any edit inside it covers it.
     return rel.endsWith("/") ? !have.some(e => e.startsWith(`${abs}/`)) : !have.includes(abs);
   });
 }

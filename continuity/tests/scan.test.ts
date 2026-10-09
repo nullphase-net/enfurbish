@@ -470,9 +470,9 @@ test("files_edited_blind flags a populated files_edited that git shows is incomp
 test("files_edited_blind stays absent when files_edited covers everything git saw", async () => {
   const root = repoAt("2026-08-18T18:00:00-05:00");
   writeFileSync(join(root, "a.txt"), "x");
-  // A Write into a new directory: git collapses it to `newdir/`, which a.txt's
-  // sibling in files_edited covers.
-  mkdirSync(join(root, "newdir"));
+  // A Write into an embedded repo: git collapses it to `newdir/` even under `-uall`,
+  // and a.txt's sibling in files_edited covers it.
+  spawnSync("git", ["init", "-q", join(root, "newdir")]);
   writeFileSync(join(root, "newdir", "b.txt"), "y");
   const r = await parseTranscript(mixedSession(root, [join(root, "a.txt"), join(root, "newdir", "b.txt")]));
   expect(r.files_changed).toEqual(["a.txt", "newdir/"]);
@@ -650,6 +650,21 @@ test("gitChangedSince excludes dirty files that predate the window", () => {
   expect(got).not.toContain("left-over.txt");
 });
 
+// git collapses an untracked dir to `dir/` unless asked not to, and the dir's mtime
+// stays put when a file inside it is rewritten. Measured 2026-10-09: an untracked
+// skill dir dated 09-30, its SKILL.md rewritten in the session, files_changed empty.
+test("gitChangedSince judges each file in an untracked dir by its own mtime", () => {
+  const root = repoAt("2026-08-18T18:00:00-05:00");
+  const dir = join(root, "skill");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "SKILL.md"), "rewritten in the window");
+  writeFileSync(join(dir, "old.md"), "from a prior session");
+  const old = new Date("2026-08-18T12:00:00-05:00");
+  utimesSync(join(dir, "old.md"), old, old);
+  utimesSync(dir, old, old);
+  expect(gitChangedSince(root, "2026-08-18T19:00:00-05:00")!.files).toEqual(["skill/SKILL.md"]);
+});
+
 // The other direction: the filter must not swallow a file the session really wrote.
 // A deletion cannot be stat'd at all and is kept rather than dropped.
 test("gitChangedSince keeps in-window edits and un-stattable deletions", () => {
@@ -668,14 +683,7 @@ test("gitChangedSince keeps in-window edits and un-stattable deletions", () => {
 // not this scan's to drop.
 test("gitChangedSince does not report the cwd's own NEXT_SESSION.md as session work", () => {
   const root = repoAt("2026-08-18T18:00:00-05:00");
-  // sub/ must be tracked, or git collapses the untracked dir to "sub/" and hides the pointer's name
-  mkdirSync(join(root, "sub"));
-  writeFileSync(join(root, "sub", "tracked.txt"), "x");
-  spawnSync("git", ["add", "-A"], { cwd: root });
-  spawnSync("git", ["commit", "-q", "-m", "sub"], {
-    cwd: root,
-    env: { ...process.env, GIT_COMMITTER_DATE: "2026-08-18T18:30:00-05:00", GIT_AUTHOR_DATE: "2026-08-18T18:30:00-05:00" },
-  });
+  mkdirSync(join(root, "sub"));   // untracked: listed by file, not collapsed to "sub/"
   writeFileSync(join(root, "NEXT_SESSION.md"), "# Next session — proj\n");
   writeFileSync(join(root, "real.txt"), "session work");
   writeFileSync(join(root, "sub", "NEXT_SESSION.md"), "# Next session — sub\n");
