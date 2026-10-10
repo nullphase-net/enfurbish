@@ -487,12 +487,47 @@ describe("--tag", () => {
     main(["--tag", "la red", "networking"], c, s => void first.push(s));
     expect(first.some(l => l.startsWith("  was:"))).toBe(false);
     const again: string[] = [];
-    main(["--tag", "la red", "rf, hardware"], c, s => void again.push(s));
+    main(["--tag", "la red", "rf, hardware", "--replace"], c, s => void again.push(s));
     expect(again).toEqual([
       'tagged "la red" -> rf, hardware',
       "  was: networking",
       "  now: es: la red — network | 2026-02-01 | ✓ | subj: rf, hardware | seen: 2026-02-01",
     ]);
+  });
+
+  // A due list snapshotted at session start showed a term [untagged] after another
+  // session had tagged it, and the retag overwrote 'software, ops' (journal #81d2a9).
+  // Of 9 replacing --tag calls in local transcripts to 2026-10-10, 4 were that, each
+  // from a chained --seen && --tag that could not read the stored subject first.
+  test("a retag that would drop a stored part is refused, naming it, and writes nothing", () => {
+    const c = fixture(SEED);
+    main(["--tag", "la red", "networking, rf"], c, () => {});
+    const before = readFileSync(c.ledger, "utf8");
+    const out: string[] = [];
+    expect(main(["--tag", "la red", "hardware, RF"], c, s => void out.push(s))).toBe(0);
+    expect(out).toEqual([
+      'refused "la red" -> hardware, RF: would drop networking (--replace drops it)',
+      "  have: es: la red — network | 2026-02-01 | ✓ | subj: networking, rf | seen: 2026-02-01",
+    ]);
+    expect(readFileSync(c.ledger, "utf8")).toBe(before);
+  });
+
+  // Widening loses nothing: 'data' -> 'data, verification' was one of the 9. Parts
+  // compare without case: the ledger holds 'database, DNS'.
+  test("a retag that keeps every stored part needs no --replace", () => {
+    const c = fixture(SEED);
+    main(["--tag", "la red", "Networking"], c, () => {});
+    const out: string[] = [];
+    main(["--tag", "la red", "rf, networking"], c, s => void out.push(s));
+    expect(out[0]).toBe('tagged "la red" -> rf, networking');
+    expect(out[1]).toBe("  was: Networking");
+  });
+
+  test("--replace anywhere but last is arg misuse, not a term or a subject", () => {
+    const c = fixture(SEED);
+    expect(main(["--tag", "--replace", "la red", "rf"], c, () => {})).toBe(2);
+    expect(main(["--tag", "la red", "--replace", "rf"], c, () => {})).toBe(2);
+    expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
   });
 
   test("a missing subject is arg misuse, not a silent no-op", () => {

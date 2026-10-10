@@ -278,6 +278,11 @@ export function tag(text: string, needle: string, subject: string): string {
     .join("\n");
 }
 
+/** A subject's comma-separated parts, trimmed: what `dedupe` unions and `--tag` will not drop unasked. */
+export function subjectParts(subject: string): string[] {
+  return subject.split(",").map(s => s.trim()).filter(Boolean);
+}
+
 function tagLine(l: string, subject: string): string {
   if (SUBJ.test(l)) return l.replace(SUBJ, `subj: ${subject}`);
   if (!SEEN.test(l)) return `${l} | subj: ${subject}`;
@@ -397,7 +402,7 @@ export function dedupe(text: string): { text: string; merged: string[] } {
     const marks = es
       .map(e => e.line.split(" | ").slice(2).filter(f => !NAMED.test(f)).join(""))
       .reduce((a, b) => (b.length > a.length ? b : a));
-    const subject = [...new Set(es.flatMap(e => e.subject.split(",").map(s => s.trim()).filter(Boolean)))];
+    const subject = [...new Set(es.flatMap(e => subjectParts(e.subject)))];
     lines[idx[0]] = formatEntry(
       first.code,
       first.term,
@@ -519,7 +524,7 @@ Write the ledger with these, never by editing the file — they own the format:
   bun run $P --add <code> "<term> — <gloss>" [subject]   # new or primed item; a repeat restamps
   bun run $P --add <code> - [subject]        # ...or several, one per stdin line;
                                              #   "el hilo — thread [concurrency]" tags that line alone
-  bun run $P --tag "<term>" "<subject>"      # set a term's subject, replacing the old one
+  bun run $P --tag "<term>" "<subject>"      # set a term's subject; dropping a stored part takes --replace
   bun run $P --correct <code> "<wrong>" "<right>" "<rule>"   # they corrected you`;
 }
 
@@ -622,8 +627,9 @@ const USAGE = `usage: pastiche.ts [--due <n>]
        --add <code> - [subject]     read one "<term> — <gloss>" per line from stdin;
                                     the subject tags every line but one ending in
                                     its own: "el hilo — thread [concurrency]"
-       --tag "<term>" "<subject>"   set what an existing term is about, replacing
-                                    the subject it had
+       --tag "<term>" "<subject>" [--replace]
+                                    set what an existing term is about; a subject
+                                    that drops a stored part takes --replace
        --correct <code> "<wrong>" "<right>" "<rule>"
        --dedupe                     merge each term's copies into one line
        --path`;
@@ -694,7 +700,21 @@ export function main(
   if (flag === "--seen") return edit(restamp, "restamped");
   if (flag === "--mark") return edit(mark, "✓");
   if (flag === "--tag") {
-    return args[2] ? edit(tag, "tagged", args[2], l => parseLedger(l)[0]?.subject ?? "") : usage();
+    if (!args[2] || args.slice(1, 3).includes("--replace")) return usage();
+    // A retag that drops a stored part takes --replace. A due list snapshotted at
+    // session start showed a term [untagged] after another session tagged it, and a
+    // chained `--seen && --tag` overwrote 'software, ops' unread: 4 of the 9 replacing
+    // calls in local transcripts (journal #81d2a9). Widening drops nothing, so it passes.
+    const before = read();
+    const hits = before ? matchingLines(before, args[1]) : [];
+    const keep = new Set(subjectParts(args[2]).map(p => p.toLowerCase()));
+    const dropped = [...new Set(hits.flatMap(l => subjectParts(parseLedger(l)[0]?.subject ?? "")))]
+      .filter(p => !keep.has(p.toLowerCase()));
+    if (dropped.length && args[3] !== "--replace") {
+      out(`refused ${JSON.stringify(args[1])} -> ${args[2]}: would drop ${dropped.join(", ")} (--replace drops ${dropped.length === 1 ? "it" : "them"})`);
+      return out(`  have: ${hits[0].slice(2)}`), 0;
+    }
+    return edit(tag, "tagged", args[2], l => parseLedger(l)[0]?.subject ?? "");
   }
 
   if (flag === "--dedupe") {

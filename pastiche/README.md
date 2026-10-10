@@ -68,7 +68,10 @@ la valuación — into technical work they could never fit. The tag doesn't filt
 it hands over evidence the ledger already had. An untagged line surfaces marked `[untagged]`,
 which asks the session to derive the subject and tag it. The due list, in the hook and from
 `--due`, ends with how many terms are still untagged, so a backlog can be seen and worked
-down. `--tag` on a term that already has a subject prints the one it replaced.
+down. `--tag` on a term that already has a subject prints the one it replaced, and refuses a
+subject that would drop one of its stored parts unless the call ends `--replace`: a session
+working from a due list snapshotted before another session's tag otherwise overwrites it
+unread. Widening a subject drops nothing and needs no flag.
 
 Rotation has two inputs. Sessions restamp what they use, so used items move to the back and
 unused ones drift to the front. And an item the hook shows in 3 sessions that never use it
@@ -113,7 +116,7 @@ bun run lib/pastiche.ts --mark "teuk"              # used it right — ✓ and r
 bun run lib/pastiche.ts --add km "ទឹក (teuk) — water" "family, food"
 bun run lib/pastiche.ts --add km - "rf, hardware"  # ...or several, one per stdin line
 bun run lib/pastiche.ts --add es -                 # a line ending "[concurrency]" is tagged alone
-bun run lib/pastiche.ts --tag "teuk" "family, food"   # set its subject, replacing the old one
+bun run lib/pastiche.ts --tag "teuk" "family, food"   # set its subject; dropping a stored part takes --replace
 bun run lib/pastiche.ts --correct es "costa" "cuesta" "costar is o→ue, stressed forms only"
 bun run lib/pastiche.ts --dedupe                   # merge each term's copies into one line
 bun run lib/pastiche.ts --path                     # resolved ledger path
