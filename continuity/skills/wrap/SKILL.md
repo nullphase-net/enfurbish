@@ -105,7 +105,7 @@ Authoring rules:
 
 - Say in words when an item is untested: "untested lead", "not yet run". No special prefix; `/next` reads items semantically.
 - Every measured fact names the artifact that produced it, inline: a result file, a commit sha, a `file.py:symbol`.
-- Verify any claim the item makes about the repo before writing it: counts, remaining budget, whether a proposed experiment is still feasible. A number this session measured an hour ago is not verified; re-run it now.
+- Verify any claim the item makes about the repo before writing it: counts, remaining budget, whether a proposed experiment is still feasible. A number this session measured an hour ago is not verified; re-run it now. A count about another repo or store (a delegated store's unpushed commits or pending rows) goes stale at that repo's next commit, which `--since` cannot see: write the command that reads it, not the number.
 - An item that waits on a condition ("do X once Y lands") says whether Y has already happened as of writing. An unattended session obeys the condition as written.
 - When the scan's `worktree.before_session` is above zero, uncommitted work has already outlived a session. Put `worktree.summary` under Don't forget, verbatim.
 - A Don't-forget bullet guards an open thread, or a row in the tool the file delegates to. A fact that guards none belongs in a project doc, not in a file about what is open. The wrap writes no doc, so carry it and name it in the retro's Learnings with the doc it belongs in; the user moves it, and `--cwd` marks the section `dont-forget:N` past 12 bullets until they do. Dropping it is not an option: a 2026-08-16 session spent two days re-deriving a fact staged here.

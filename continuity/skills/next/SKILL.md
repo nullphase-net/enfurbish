@@ -33,6 +33,7 @@ Use when the user wants to pick up where the last session left off, or to re-con
    - Mention the wrap timestamp from the file header so the user knows how stale it is.
    - An item the last session flagged as untested is a hypothesis, not a finding. Present it as one — never as a settled result.
    - So is a line that says a process, job or watch is running. Check each one before you relay it (`launchctl list <label>`, `pgrep -f '/full/path/[s]nap.sh'`, the newest log's mtime), and say which checks failed. Keep the brackets: the shell running the check holds the pattern in its own command line, and Linux's `pgrep` skips only itself, so a bare `pgrep -f /full/path/snap.sh` matches that shell and reports a dead process alive. macOS's skips its ancestors, so the bare form only looks safe there. A "running" claim once stood 15 days after its watch died.
+   - So is an item waiting on someone to install or apply an artifact (a patch, a script, a config). Compare the artifact with its install target (a hash, or a grep for the change) before relaying it as pending: a patch "waiting on the user" had been applied a day before the briefing that read it out (2026-10-09).
    - So is an item that states a mechanism or a number with no artifact named — no file, commit or command behind it. The wrap is told to name one; when it did not, relay the item as a claim to check before acting on it, not as background (journal #628a80, 2026-09-14).
 
 4. **Ask the user which thread to pick up, unless the invocation already named one.**
