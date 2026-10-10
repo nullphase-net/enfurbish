@@ -169,6 +169,25 @@ test("parseTranscript counts one record per hook run, and denials apart", async 
   expect(r.hooks.PreToolUse).toEqual({ fired: 0, denied: 2 });
 });
 
+// A mod's handler records no run, only its output, under its own event name: a
+// wrap read UserPromptSubmit 0 against 2 prompt.submit injections (journal #2a53be).
+test("parseTranscript counts a mod's fires under its own event name, one per fire", async () => {
+  const att = (type: string, hookName: string, hookEvent: string, toolUseID: string) => JSON.stringify({
+    type: "attachment", attachment: { type, hookName, hookEvent, toolUseID },
+    timestamp: "2026-08-18T00:00:00.000Z", sessionId: "77777777-0000-0000-0000-000000000000",
+  });
+  const r = await parseTranscript(writeSession([
+    att("hook_additional_context", "prompt.submit", "UserPromptSubmit", "hook-1"),
+    att("hook_additional_context", "prompt.submit", "UserPromptSubmit", "hook-2"),
+    att("hook_system_message", "prompt.submit", "UserPromptSubmit", "hook-2"),   // same fire, second channel
+    att("hook_success", "SessionStart:startup", "SessionStart", "s1"),
+    att("hook_success", "SessionStart", "SessionStart", "s1"),
+  ]));
+  expect(r.hooks["prompt.submit"]).toEqual({ fired: 2 });
+  expect(r.hooks.UserPromptSubmit).toBeUndefined();
+  expect(r.hooks.SessionStart).toEqual({ fired: 2 });
+});
+
 test("parseTranscript captures skills_invoked", async () => {
   const r = await parseTranscript(FIXTURE);
   expect(r.skills_invoked).toContain("superpowers:brainstorming");

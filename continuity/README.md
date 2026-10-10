@@ -148,7 +148,7 @@ The retro and journal entry are informed by `scan.ts`, which parses the current 
 - Session start/end timestamps and duration
 - User turn count vs model turn count. A user turn is a typed prompt, a slash command, or a pasted attachment; the records Claude Code synthesizes into the user role are excluded — the tag-wrapped ones (`<task-notification>`, `<local-command-stdout>`, `<system-reminder>`), tool results, `[Request interrupted by user]`, and anything flagged `isMeta` (relayed agent messages, `/loop` re-fires, skill bodies) or `isCompactSummary`.
 - Per-tool call counts and error counts, bucketed into `tools` (built-ins) vs `mcp` (`mcp__*` calls)
-- Hooks per event: `fired` counts the runs the transcript recorded, one per hook command (a hook that runs silently, as most PreToolUse guards do, records nothing), and `denied` the tool calls a hook blocked
+- Hooks per event: `fired` counts the runs the transcript recorded, one per hook command (a hook that runs silently, as most PreToolUse guards do, records nothing), and `denied` the tool calls a hook blocked. A mod records only its output, so its event counts under its own name (`prompt.submit`), one per fire
 - `compaction_count` — number of `compact_boundary` events. A compaction does not truncate the transcript, so the counts above still cover the whole session.
 - Skills invoked — both `Skill` tool calls and slash commands typed by the user, so built-in commands (`/clear`, `/compact`) appear here too
 - Files edited (most-recent first, capped at 50), from Edit/Write records only

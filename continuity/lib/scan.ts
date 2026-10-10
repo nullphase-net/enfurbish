@@ -102,6 +102,7 @@ export type ScanOk = {
    * (its output channels, a banner or a context block, are not runs). A hook that runs
    * silently records nothing, so a PreToolUse `fired` is no count of guarded calls.
    * `denied` is the tool calls a hook blocked, present only when some were.
+   * A mod's event (`prompt.submit`) is its own key, `fired` one per fire it answered.
    */
   hooks: Record<string, { fired: number; denied?: number }>;
   /**
@@ -446,6 +447,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
   const tools: Record<string, { calls: number; errors: number }> = {};
   const mcp: Record<string, { calls: number; errors: number }> = {};
   const hooks: Record<string, { fired: number; denied?: number }> = {};
+  const modFires = new Map<string, Set<string>>();   // mod event name → its fires' toolUseIDs
   const skillsSet = new Set<string>();
   const editsByFile = new Map<string, number>();   // file_path → last-seen index
   let editIdx = 0;
@@ -489,6 +491,16 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
 
     if (obj.type === "attachment" && obj.attachment?.hookEvent) {
       const ev: string = obj.attachment.hookEvent;
+      const name: string = obj.attachment.hookName ?? ev;
+      // A mod's handler records no run, only its output, and names its own event
+      // (`prompt.submit` under UserPromptSubmit), so a wrap read UserPromptSubmit 0
+      // against 2 injections (#2a53be). One fire's channels share a toolUseID.
+      if (name !== ev && !name.startsWith(`${ev}:`)) {
+        const fires = modFires.get(name) ?? new Set<string>();
+        fires.add(obj.attachment.toolUseID ?? obj.uuid);
+        modFires.set(name, fires);
+        continue;
+      }
       hooks[ev] = hooks[ev] ?? { fired: 0 };
       if (!HOOK_OUTPUT.has(obj.attachment.type)) hooks[ev].fired++;
       continue;
@@ -585,6 +597,7 @@ export async function parseTranscript(path: string): Promise<ScanOk> {
     || (top !== undefined && editsMiss(gitChanged!, [...editsByFile.keys()], top)));
 
   const worktree = worktreeState(cwd, firstTs!);
+  for (const [name, fires] of modFires) hooks[name] = { fired: fires.size };
 
   return {
     ok: true,
