@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "continuity",
-      "source": { "source": "git-subdir", "url": "https://github.com/nullphase-net/enfurbish.git", "path": "continuity", "ref": "continuity-v0.19.0" },
+      "source": { "source": "git-subdir", "url": "https://github.com/nullphase-net/enfurbish.git", "path": "continuity", "ref": "continuity-v0.20.0" },
       "description": "Intentional session continuity: /wrap retro, /next command, and a SessionStart hook that surfaces NEXT_SESSION.md handoffs.",
       "author": { "name": "phreakocious" },
       "category": "workflow",
@@ -24,7 +24,7 @@
     },
     {
       "name": "pastiche",
-      "source": { "source": "git-subdir", "url": "https://github.com/nullphase-net/enfurbish.git", "path": "pastiche", "ref": "pastiche-v0.13.0" },
+      "source": { "source": "git-subdir", "url": "https://github.com/nullphase-net/enfurbish.git", "path": "pastiche", "ref": "pastiche-v0.14.0" },
       "description": "Ambient language learning. Hooks weave vocabulary into ordinary sessions — stale items you are forgetting, a small budget of new terms drawn from the work itself, and anything you use unprompted recorded rather than taught back at you. The ledger is a markdown file you own, written by a CLI rather than by hand.",
       "author": { "name": "phreakocious" },
       "category": "workflow",
