@@ -234,7 +234,7 @@ test("a Closed line naming an action's #id retires it from every block, and only
   expect(openRows(r.stdout).map(l => l.replace(ROW, "").replace(/\s+/g, " ").trim()))
     .toEqual(["[proj] toolC newest idea", "[proj] toolB middle idea"]);
   expect(r.stdout).toContain("shipped in 0.10.0");   // the close itself still shows
-  expect(r.stdout.split("\n")[0]).toMatch(/^2 open of 3/);
+  expect(r.stdout.split("\n")[0]).toMatch(/^2 open of 3 actions · 1 retired \(1 close\)$/);
 });
 
 test("a close under another heading retires the action even when --tool filters to the action's own", () => {
@@ -244,7 +244,8 @@ test("a close under another heading retires the action even when --tool filters 
   closeWith(j, `#${id} done`, "somebody else");
   const r = cli(j, "--actions", "--tool", "toolA");
   expect(openRows(r.stdout).length).toBe(0);
-  expect(r.stdout.split("\n")[0]).toMatch(/^0 open of 1/);
+  // Retired counts the global close; the close count is only the filtered block's, here none.
+  expect(r.stdout.split("\n")[0]).toMatch(/^0 open of 1 action · 1 retired · "toolA" matches/);
 });
 
 // The head already says `0 open`; a bare `open:` under the closed block said it again
@@ -254,7 +255,7 @@ test("with every action closed, the closed block ends without an empty open: lab
   const id = idOf(cli(j, "--actions").stdout, "oldest idea");
   closeWith(j, `#${id} done`, "toolA");
   const out = cli(j, "--actions", "--tool", "toolA").stdout.trimEnd().split("\n");
-  expect(out[0]).toMatch(/^0 open of 1 · 1 closed/);
+  expect(out[0]).toMatch(/^0 open of 1 action · 1 retired \(1 close\)/);
   expect(out.at(-1)).toContain(`#${id} done`);
   expect(out).not.toContain("open:");
   expect(cli(j, "--actions").stdout).toContain("\nopen:\n");   // still there when rows follow it
@@ -265,7 +266,7 @@ test("a Closed line with no #id retires nothing, and the head says so", () => {
   closeWith(j, "the oldest idea is done");
   const r = cli(j, "--actions");
   expect(openRows(r.stdout).some(l => l.includes("oldest idea"))).toBe(true);
-  expect(r.stdout.split("\n")[0]).toMatch(/3 open of 3 · 1 closed \(1 names? no #id\)/);
+  expect(r.stdout.split("\n")[0]).toBe("3 open of 3 actions · 0 retired (1 close, 1 names no #id)");
 });
 
 test("the closed block is capped at --limit, with the overflow counted", () => {

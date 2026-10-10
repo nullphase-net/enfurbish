@@ -266,10 +266,14 @@ export function reportActions(secs: Section[], tool: string | undefined, limit: 
   // later one that forgot: it reads as a retirement and removes nothing.
   const bare = done.filter(c => idsIn(c.text).length === 0).length;
   const scope = tool ? ` · "${tool}" matches ${hit.length}/${secs.length} sections, ${spellings(hit)} spellings` : "";
-  const closedNote = done.length
-    ? ` · ${done.length} closed${bare ? ` (${bare} name${bare === 1 ? "s" : ""} no #id)` : ""}`
+  // One unit, actions: '87 open of 663 · 207 closed' read as a broken sum, because
+  // 207 counts close lines and one close retires many ids (#bf59b0, 2026-10-06).
+  const nRetired = all.length - acts.length;
+  const closes = done.length
+    ? ` (${done.length} close${done.length === 1 ? "" : "s"}${bare ? `, ${bare} name${bare === 1 ? "s" : ""} no #id` : ""})`
     : "";
-  const head = `${acts.length} open of ${all.length}${closedNote}${scope}`;
+  const retiredNote = nRetired || done.length ? ` · ${nRetired} retired${closes}` : "";
+  const head = `${acts.length} open of ${all.length} action${all.length === 1 ? "" : "s"}${retiredNote}${scope}`;
   if (acts.length === 0 && done.length === 0) return head;
 
   const recent = acts.slice(0, limit);
@@ -294,7 +298,8 @@ export function reportActions(secs: Section[], tool: string | undefined, limit: 
       ...(acts.length ? ["open:"] : []),
     ] : []),
     ...recent.map(a => row(a, true, full)),
-    ...(hidden > 0 ? [`+${hidden} older`] : []),
+    // Names the flag: finding what lists 59 hidden rows took the usage text (#bf59b0).
+    ...(hidden > 0 ? [`+${hidden} older (--limit ${acts.length})`] : []),
     ...(stale.length ? ["stale:", STALE_GUIDANCE, ...stale.map(a => row(a, true, full))] : []),
   ].join("\n");
 }

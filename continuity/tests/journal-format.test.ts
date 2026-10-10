@@ -153,7 +153,7 @@ test("a loose match is loose on purpose — 'pastiche' also reaches a combined h
 
 test("reportActions leads with the count, the match rate and the drift", () => {
   const out = reportActions(parseSections(DRIFTED), "continuity", 20).split("\n");
-  expect(out[0]).toBe('4 open of 4 · "continuity" matches 4/5 sections, 4 spellings');
+  expect(out[0]).toBe('4 open of 4 actions · "continuity" matches 4/5 sections, 4 spellings');
   expect(out[1]).toContain("(10th repetition)"); // newest first
 });
 
@@ -178,10 +178,10 @@ const manyActions = (n: number) =>
 
 test("reportActions caps rows, shows the oldest anyway, and counts only the hidden middle", () => {
   const out = reportActions(manyActions(30), undefined, 20).split("\n");
-  expect(out[0]).toBe("30 open of 30");
+  expect(out[0]).toBe("30 open of 30 actions");
   expect(out.filter(l => l === "stale:")).toHaveLength(1);
   // 20 newest + 5 oldest shown, so exactly 5 sit unseen in the middle.
-  expect(out).toContain("+5 older");
+  expect(out).toContain("+5 older (--limit 30)");
   expect(out.at(-1)).toContain("fix number 0.");   // the very oldest is on screen
   expect(out[1]).toContain("fix number 29.");      // ...and so is the newest
 });
@@ -197,7 +197,7 @@ test("recent + stale + hidden always equals the total", () => {
   for (const [n, limit] of [[30, 20], [4, 2], [26, 20], [25, 20], [1, 20]] as const) {
     const out = reportActions(manyActions(n), undefined, limit).split("\n");
     const shown = out.filter(l => /fix number \d+\./.test(l)).length;
-    const hiddenLine = out.find(l => /^\+\d+ older$/.test(l));
+    const hiddenLine = out.find(l => /^\+\d+ older \(--limit \d+\)$/.test(l));
     const hidden = hiddenLine ? Number.parseInt(hiddenLine.slice(1), 10) : 0;
     expect(shown + hidden).toBe(n);
   }
@@ -216,13 +216,13 @@ test("no stale block, and no hidden count, when every action already fits", () =
 test("a backlog just past the cap spills into stale rather than hiding anything", () => {
   const out = reportActions(manyActions(22), undefined, 20).split("\n");
   expect(out).toContain("stale:");
-  expect(out.some(l => /^\+\d+ older$/.test(l))).toBe(false);
+  expect(out.some(l => /^\+\d+ older \(--limit \d+\)$/.test(l))).toBe(false);
   expect(out.at(-1)).toContain("fix number 0.");
 });
 
 test("reportActions on no match states the zero rather than staying silent", () => {
   expect(reportActions(parseSections(DRIFTED), "nosuchtool", 20))
-    .toBe('0 open of 0 · "nosuchtool" matches 0/5 sections, 0 spellings');
+    .toBe('0 open of 0 actions · "nosuchtool" matches 0/5 sections, 0 spellings');
 });
 
 test("reportRecent returns whole sections, newest first", () => {
@@ -266,7 +266,7 @@ test("findActions does not pick up Closed lines, and findClosed does not pick up
 
 test("reportActions leads with the closed block so a reader reaches it", () => {
   const out = reportActions(parseSections(WITH_CLOSED), undefined, 20);
-  expect(out).toContain("1 open of 1 · 1 closed (1 names no #id)");
+  expect(out).toContain("1 open of 1 action · 0 retired (1 close, 1 names no #id)");
   expect(out.indexOf("closed:")).toBeLessThan(out.indexOf("open:"));
   expect(out.indexOf("register gate")).toBeLessThan(out.indexOf("something still open"));
 });
@@ -279,8 +279,9 @@ test("reportActions says nothing about closed when nothing is closed", () => {
     tools: [{ name: "t", verdict: "helped", action: "do the thing" }],
   });
   const out = reportActions(parseSections(plain), undefined, 20);
-  expect(out).toContain("1 open of 1");
+  expect(out).toContain("1 open of 1 action");
   expect(out).not.toContain("closed");
+  expect(out).not.toContain("retired");
   expect(out).not.toContain("open:");
 });
 
