@@ -640,6 +640,49 @@ test("gitChangedSince does not flag a re-dated path the window also committed or
   expect(gitChangedSince(dirty, "2026-08-18T17:00:00-05:00")!.predated).toEqual([]);
 });
 
+/** `branch` holds one commit per [file, iso], merged --no-ff into main at `mergeIso` after `onMain`'s. */
+function repoMerged(branch: [string, string][], mergeIso: string, onMain: [string, string][] = []): string {
+  const root = repoAt("2026-08-18T15:00:00-05:00");
+  spawnSync("git", ["checkout", "-q", "-b", "side"], { cwd: root });
+  for (const [file, iso] of branch) commitAt(root, file, iso);
+  spawnSync("git", ["checkout", "-q", "main"], { cwd: root });
+  for (const [file, iso] of onMain) commitAt(root, file, iso);
+  const fx = gitInitClean(mkdtempSync(join(tmpdir(), "scan-home-")));
+  try {
+    spawnSync("git", ["merge", "-q", "--no-ff", "side", "-m", "merge"], {
+      cwd: root, env: { ...process.env, GIT_COMMITTER_DATE: mergeIso, GIT_AUTHOR_DATE: mergeIso },
+    });
+  } finally {
+    fx.cleanup();
+  }
+  return root;
+}
+
+// Plain --name-only lists no files for a merge: a --no-ff merge of commits made
+// before the window put 8 of its 9 files in neither list (2026-10-09, journal
+// #2b0d56). A merge lists what it brought against its first parent, dated by the
+// newest commit it merged rather than by the merge.
+test("gitChangedSince lists a merge's files, flagged when all it merged predates the window", () => {
+  const iso = "2026-08-18T17:00:00-05:00";
+  // main's own commit in the window is not something the merge merged.
+  const old = gitChangedSince(repoMerged([["a.txt", "2026-08-18T16:00:00-05:00"], ["b.txt", "2026-08-18T16:30:00-05:00"]],
+    "2026-08-18T18:00:00-05:00", [["m.txt", "2026-08-18T17:15:00-05:00"]]), iso)!;
+  expect(old.files).toEqual(["a.txt", "b.txt", "m.txt"]);
+  expect(old.predated).toEqual(["a.txt", "b.txt"]);
+  // One merged commit authored in the window makes the merge the session's work.
+  const mixed = gitChangedSince(repoMerged([["a.txt", "2026-08-18T16:00:00-05:00"], ["b.txt", "2026-08-18T17:30:00-05:00"]], "2026-08-18T18:00:00-05:00"), iso)!;
+  expect(mixed.files).toEqual(["a.txt", "b.txt"]);
+  expect(mixed.predated).toEqual([]);
+  // A merge that merged no commit of its own is dated by itself, and does not throw.
+  const root = repoMerged([["a.txt", "2026-08-18T16:00:00-05:00"]], "2026-08-18T16:30:00-05:00");
+  commitAt(root, "c.txt", "2026-08-18T17:30:00-05:00");
+  const at = "2026-08-18T18:00:00-05:00";
+  const sha = spawnSync("git", ["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-p", "HEAD~1", "-m", "empty"],
+    { cwd: root, encoding: "utf8", env: { ...process.env, GIT_COMMITTER_DATE: at, GIT_AUTHOR_DATE: at } }).stdout.trim();
+  spawnSync("git", ["reset", "-q", "--hard", sha], { cwd: root });
+  expect(gitChangedSince(root, iso)).toEqual({ files: ["c.txt"], predated: [] });
+});
+
 test("gitChangedSince flags nothing when every commit was authored in the window", () => {
   const got = gitChangedSince(repoAt("2026-08-18T18:00:00-05:00"), "2026-08-18T17:00:00-05:00")!;
   expect(got.files).toEqual(["committed.txt"]);

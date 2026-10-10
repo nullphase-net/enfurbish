@@ -233,8 +233,11 @@ export function gitChangedSince(
   const scanTree = (top: string, tag: string, range: string[]): boolean => {
     const git = (...args: string[]) =>
       spawnSync("git", ["-C", top, ...args], { encoding: "utf8", maxBuffer: 8 << 20 });
-    // Each commit opens with \x01 and its author time, then its paths.
-    const log = git("log", "--name-only", "--pretty=format:%x01%at", `--since=${iso}`, ...range);
+    // Each commit opens with \x01, its author time, sha and parents, then its paths.
+    // Plain --name-only lists no files for a merge, so a --no-ff merge of commits made
+    // before the window put 8 of its 9 files in neither list (2026-10-09, journal
+    // #2b0d56). A merge now lists what it brought against its first parent.
+    const log = git("log", "--name-only", "--diff-merges=first-parent", "--pretty=format:%x01%at %H %P", `--since=${iso}`, ...range);
     if (log.status !== 0) return false;
     // `--porcelain` is stable across git versions by contract; `-z` avoids the quoting
     // it applies to paths with spaces. XY status is the first two bytes, path the rest.
@@ -247,11 +250,18 @@ export function gitChangedSince(
     // commits-only list reads as complete, so a failed status is "could not answer".
     if (dirty.status !== 0) return false;
     for (const commit of log.stdout.split("\x01")) {
-      const [at, ...paths] = commit.split("\n").map(l => l.trim());
+      const [head, ...paths] = commit.split("\n").map(l => l.trim());
+      const [at, sha, ...parents] = head.split(" ");
+      // A merge's paths are as old as the newest commit it merged: merging old work
+      // in is not authoring it, and one merged commit from the window is.
+      const merged = parents.length > 1 ? git("log", "--no-merges", "--format=%at", `${sha}^1..${sha}`) : null;
+      const ats = merged?.status === 0 ? merged.stdout.split("\n").filter(Boolean).map(Number) : [];
+      // reduce, not a spread: merging an upstream can bring in more commits than a call takes arguments.
+      const when = ats.length ? ats.reduce((a, b) => Math.max(a, b)) : Number(at);
       for (const f of paths.filter(Boolean)) {
         seen.add(tag + f);
         committed.add(tag + f);
-        if (Number(at) * 1000 >= cutoff) authoredIn.add(tag + f);
+        if (when * 1000 >= cutoff) authoredIn.add(tag + f);
       }
     }
     // A rename emits two NUL fields: `R  <dest>` then a bare `<src>` with no status
