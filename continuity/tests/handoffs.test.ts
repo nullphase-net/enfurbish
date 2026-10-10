@@ -469,7 +469,13 @@ test("--cwd and --since say when HEAD is behind main, and stay silent on main", 
   const lag = "HEAD wip is 2 commits behind main; its commits are not counted";
   expect(run("--cwd", root)).toEndWith(` · ${lag}`);
   expect(run("--since", join(root, "NEXT_SESSION.md"))).toEndWith(` · ${lag}`);
-  expect(run("--since", join(root, "NEXT_SESSION.md"))).not.toContain("other branches");   // main is the lag's to name
+  // The lag is main's whole distance, not what landed on it since the header. Left to
+  // the lag alone, main's 6 post-header commits read 'handoff still describes HEAD'
+  // (2026-10-09, journal #badf6b): main is listed like any other branch.
+  const [head, ...subjects] = windowSince(root, join(root, "NEXT_SESSION.md")).split("\n");
+  expect(head).toBe("0 commits since 2026-08-18T17:00:00-05:00 — HEAD has not moved, but other branches have"
+    + ` · other branches since the header: main +2 · ${lag}`);
+  expect(subjects).toEqual([expect.stringMatching(/^  main: [0-9a-f]{7,}  /), expect.stringMatching(/^  main: /)]);
   mkdirSync(join(root, "early"));
   writeFileSync(join(root, "early", "NEXT_SESSION.md"), HANDOFF("2026-08-18T15:00:00-05:00"));
   expect(run("--since", join(root, "early", "NEXT_SESSION.md"))).toEndWith(` · ${lag}`);   // the window with commits in it

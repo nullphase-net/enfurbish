@@ -72,8 +72,9 @@ still describes HEAD` (the all-clear), `0 commits · N uncommitted … predates 
 cwd first and the project root second, so the relative path the listing prints can be handed
 straight back. Both counts read HEAD, so when HEAD sits behind the default branch, the listing and
 the window both end with `HEAD <branch> is N commits behind main; its commits are not counted`.
-Any other branch HEAD lacks counted nowhere either, so the window names each one with commits after
-the header and the worktree holding it (`other branches since the header: fix/x +8 [../repo-fix]`),
+That count is the whole distance, not what landed since the header, so the window also names each
+branch HEAD lacks, the default one included, with its commits after the header and the worktree
+holding it (`other branches since the header: fix/x +8 [../repo-fix]`),
 lists those commits' subjects under HEAD's, and `0 commits` then reads `HEAD has not moved, but other branches have` instead of the all-clear.
 The listing prints the live layout under its head line, `branches vs main: ahead fix/x +8
 [../repo-fix] · merged old`, so a handoff need not carry one: a typed layout goes stale.

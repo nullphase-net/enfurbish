@@ -346,7 +346,7 @@ export function headLag(root: string): string {
 }
 
 /**
- * Every local branch but `against` (HEAD, or a branch name) and `skip`: in `ahead`
+ * Every local branch but `against` (HEAD, or a branch name): in `ahead`
  * as `name +N` when it holds N commits `against` lacks, else in `merged`, each with
  * `[path]` from the project root when a worktree has it checked out. With `since`,
  * only commits after it count. null when git cannot list branches.
@@ -361,7 +361,7 @@ export type Branch = { name: string; n: number; where: string };
 const shownAs = (b: Branch) => `${b.name}${b.n ? ` +${b.n}` : ""}${b.where}`;
 
 export function branchesAhead(
-  root: string, against: string, opts: { since?: string; skip?: string } = {},
+  root: string, against: string, opts: { since?: string } = {},
 ): { ahead: Branch[]; merged: Branch[] } | null {
   const git = gitIn(root);
   const refs = git("for-each-ref", "refs/heads", "--format=%(refname:short)%00%(worktreepath)");
@@ -374,7 +374,7 @@ export function branchesAhead(
   const merged: Branch[] = [];
   for (const rec of refs.stdout.split("\n").filter(Boolean)) {
     const [name, wt] = rec.split("\0");
-    if (name === against || name === opts.skip) continue;
+    if (name === against) continue;
     const where = wt ? ` [${relative(top, wt) || "."}]` : "";
     const since = opts.since ? [`--since=${opts.since}`] : [];
     const n = Number.parseInt(git("rev-list", "--count", ...since, `refs/heads/${name}`, "--not", vs).stdout ?? "", 10);
@@ -535,9 +535,10 @@ export function windowSince(root: string, path: string, limit = 25): string {
   }
   const lag = headLag(root);
   const lagNote = lag ? ` · ${lag}` : "";
-  // What landed on branches HEAD lacks. The default branch is left to `lag` when HEAD
-  // is behind it, which already names it.
-  const others = branchesAhead(root, "HEAD", { since: iso, skip: lag ? baseBranch(root) : undefined });
+  // What landed on branches HEAD lacks, the default branch included. Leaving it to
+  // `lag` printed its whole distance and the all-clear beside it, while 6 of its
+  // commits had reworked the handoff since its header (2026-10-09, journal #badf6b).
+  const others = branchesAhead(root, "HEAD", { since: iso });
   const othersNote = others === null ? " · other branches unknown"
     : others.ahead.length ? ` · other branches since the header: ${listed(others.ahead.map(shownAs))}` : "";
   // Their subjects, as HEAD's are listed: a count says work landed, not which open
