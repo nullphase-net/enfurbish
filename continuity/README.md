@@ -18,9 +18,11 @@ The final report ends with a `Worktree:` line: uncommitted paths anywhere in the
 
 `/wrap -q` (or `--quick`) does only the local repo work — `NEXT_SESSION.md`, with any learnings listed in the final report. No retro, no journal entry. For a session whose value is a clean pointer rather than a retrospective.
 
+`/wrap -j` (or `--journal`) is the other half: the retro, the journal entry and the learnings, and no `NEXT_SESSION.md`. For a project whose handoff lives in another tool with a wrap of its own, which replaces `-q` there. In such a project, with no `NEXT_SESSION.md` in the cwd, a bare `/wrap` or `-q` first asks which one you meant.
+
 A learning that should change future sessions goes in the retro. It says what happened and the cheapest place a fix could live: the environment, a hook, a scoped rule, or, last, an always-on instruction. You make the change yourself. When a wrap drafts rules and you approve them, the model ends up writing the file, and the file only grows. `rationale.md` has the measurements.
 
-The skill is three files. `SKILL.md` is the spine every wrap loads; `full.md` holds the retro and journal steps and is read only on a full wrap, so `-q` never pays for it; `rationale.md` holds the measured evidence behind each rule and is read only when a rule looks wrong for the case at hand.
+The skill is three files. `SKILL.md` is the spine every wrap loads; `full.md` holds the retro and journal steps and is read only on a full wrap or `-j`, so `-q` never pays for it; `rationale.md` holds the measured evidence behind each rule and is read only when a rule looks wrong for the case at hand.
 
 ### `/next`
 
@@ -199,7 +201,7 @@ Scoped per cwd by design. A multi-package repo (`frontend/`, `api/`) can hold in
 |---|---|---|
 | `~/.claude/sessions/YYYY-MM-DD-<slug>-<sid8>.md` | every `/wrap` — never under `-q` | plugin |
 | `~/.claude/tooling-journal.md` | every `/wrap` with a verdict to record (appended, atomic temp+rename) — never under `-q` | plugin |
-| `<cwd>/NEXT_SESSION.md` | every `/wrap`, unless all items resolved | plugin |
+| `<cwd>/NEXT_SESSION.md` | every `/wrap`, unless all items resolved — never under `-j` | plugin |
 | `~/.claude/state/continuity-firstfire/<session_id>` | first `SessionStart` fire of each session (re-fire suppression) | plugin |
 ## Installation
 

@@ -13,3 +13,18 @@ for (const skill of ["wrap", "next"]) {
     expect(text).toContain(DELEGATION);
   });
 }
+
+// The same for the whole handoff: symbion's skill tells its users that /wrap -j
+// writes the retro and the journal and no handoff file, and that /next briefs from
+// a session-start hook's output when no file exists.
+const HANDOFF_ELSEWHERE: [string, string][] = [
+  ["wrap", "`/wrap -j` (or `--journal`) runs every step but 5"],
+  ["next", "A session-start hook that already printed another tool's open list is the exception"],
+];
+
+for (const [skill, line] of HANDOFF_ELSEWHERE) {
+  test(`${skill}/SKILL.md keeps the handoff-elsewhere line`, () => {
+    const text = readFileSync(join(import.meta.dir, "..", "skills", skill, "SKILL.md"), "utf8");
+    expect(text).toContain(line);
+  });
+}

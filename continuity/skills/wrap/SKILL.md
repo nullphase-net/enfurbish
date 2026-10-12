@@ -1,6 +1,6 @@
 ---
 name: wrap
-description: Session-end retrospective. Writes a dated retro to ~/.claude/sessions/, appends to a cross-session tooling journal, and reconciles NEXT_SESSION.md so the next session can resume cleanly. Invoke as /wrap when ending a session, or /wrap -q for the local repo work only (NEXT_SESSION.md, no retro or journal).
+description: Session-end retrospective. Writes a dated retro to ~/.claude/sessions/, appends to a cross-session tooling journal, and reconciles NEXT_SESSION.md so the next session can resume cleanly. Invoke as /wrap when ending a session, /wrap -q for the local repo work only (NEXT_SESSION.md, no retro or journal), or /wrap -j for the retro and journal only (no NEXT_SESSION.md).
 ---
 
 # `/wrap` — session-end retrospective
@@ -13,11 +13,15 @@ Run at the end of a session. It captures what was learned, evaluates how the use
 
 `/wrap -q` (or `--quick`) runs steps 1, 5, 6 and 7 only: the `NEXT_SESSION.md` lifecycle and the learnings list, the work that stays inside the repo. Steps 2–4 are skipped and `full.md` is not read. Anything the procedure routes to the retro goes into the final report instead. Use it when the session's value is a clean pointer rather than a retrospective.
 
+`/wrap -j` (or `--journal`) runs every step but 5: the retro, the journal entry and the learnings, and no `NEXT_SESSION.md`. Read `full.md` as for a full wrap. Use it where another tool keeps the handoff and has a wrap of its own: that wrap replaces `-q` and records the session's open items, and `-j` is the rest.
+
+**No `NEXT_SESSION.md` in this cwd and another tool keeps the handoff: ask before anything else.** The observable is the one `/next` uses with no file: a session-start hook or a loaded skill in this session that shows another tool's open list or last wrap. There the missing file is the designed shape, and a bare `/wrap` or `-q` would create one. Ask once which was meant: for `/wrap`, `-j` or the full wrap; for `-q`, that tool's wrap or `-q` anyway. Ask first, while whoever typed `/wrap` is still there. In a headless run, where nobody can answer, run the mode as typed. A file already in this cwd, or `-j`, asks nothing. Nothing here names a tool.
+
 ## What you produce
 
-1. Retro file at `~/.claude/sessions/YYYY-MM-DD-<cwd-slug>-<sessionid8>.md` *(full only)*
-2. Journal entry appended to `~/.claude/tooling-journal.md` via `journal-append.ts` *(full only)*
-3. `NEXT_SESSION.md` at the project root: written, left alone, or removed per step 5
+1. Retro file at `~/.claude/sessions/YYYY-MM-DD-<cwd-slug>-<sessionid8>.md` *(not under `-q`)*
+2. Journal entry appended to `~/.claude/tooling-journal.md` via `journal-append.ts` *(not under `-q`)*
+3. `NEXT_SESSION.md` at the project root: written, left alone, or removed per step 5 *(not under `-j`)*
 
 ## Procedure
 
@@ -35,9 +39,9 @@ Parse the JSON. `ok: false` → note `degraded: true, reason: "..."` and proceed
 - **`skills_invoked`** includes slash commands the user typed, so built-ins (`/clear`, `/compact`, `/config`) appear beside real skills. Skip them; they are not user-modifiable tooling.
 - **`compaction_count`** is how many times the session compacted. A compaction does not truncate the jsonl, so `turn_count` covers the whole session either way; report it without a caveat.
 
-### 2–4. Journal context, retro file, journal entry *(full only; in `full.md`)*
+### 2–4. Journal context, retro file, journal entry *(not under `-q`; in `full.md`)*
 
-### 5. `NEXT_SESSION.md` lifecycle
+### 5. `NEXT_SESSION.md` lifecycle *(not under `-j`)*
 
 A rolling pointer: items survive until the work is done, not until the next wrap fires. A wrap that did not touch what the prior pointer asked for must not erase those items.
 
@@ -160,7 +164,7 @@ Add each other repo this session edited or committed to as a `<dir>`: the check 
 $SUGGEST
 ```
 
-Under `-q` drop the Retro and Journal lines, put the 5.7 note (carried, resolved, added) on a `Handoff:` line after `NEXT_SESSION:`, since there is no retro to hold it, list any learnings after the block, and head it `/wrap -q complete (local only):`. An empty `$SUGGEST` collapses; no trailing blank lines.
+Under `-q` drop the Retro and Journal lines, put the 5.7 note (carried, resolved, added) on a `Handoff:` line after `NEXT_SESSION:`, since there is no retro to hold it, list any learnings after the block, and head it `/wrap -q complete (local only):`. Under `-j` drop the `NEXT_SESSION:` line and head it `/wrap -j complete (no handoff):`. An empty `$SUGGEST` collapses; no trailing blank lines.
 
 ## Policy
 

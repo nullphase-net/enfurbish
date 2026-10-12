@@ -1,6 +1,6 @@
 # `/wrap` — steps 2–4, full wrap only
 
-`SKILL.md` sends you here on a full wrap. `-q` never runs these.
+`SKILL.md` sends you here on a full wrap and under `-j`. `-q` never runs these.
 
 ### 2. Pull cross-session journal context
 
@@ -54,6 +54,8 @@ Fill from the session and the scan:
 ## Handoff
 - NEXT_SESSION.md: written / preserved / removed (all resolved) / absent
 ```
+
+Under `-j` leave out the Handoff section: step 5 did not run.
 
 Write it to `~/.claude/sessions/YYYY-MM-DD-<cwd-slug>-<sessionid8>.md` (`mkdir -p ~/.claude/sessions` if needed).
 
