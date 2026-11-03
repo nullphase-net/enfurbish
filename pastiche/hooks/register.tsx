@@ -3,14 +3,14 @@ import type { Register } from 'claude-code'
 
 import type { PasticheVocabulary } from '../types'
 
-// Owed: the context lacks the vocabulary, so the next prompt that is not a
-// schedule's gets it. Given: the context has it. None: nothing to teach.
+// Owed: the context lacks the vocabulary, so the next prompt with a reader
+// gets it. Given: the context has it. None: nothing to teach.
 // Terms: the due list the last given prompt carried, for the band.
 const vocabulary = atom({ plugin: 'pastiche', key: 'vocabulary' } as const, 'owed' as PasticheVocabulary)
 const terms = atom({ plugin: 'pastiche', key: 'terms' } as const, [] as readonly string[])
 
 export const NO_READER =
-  'pastiche: a schedule fired this turn (a /loop or a routine), so nobody reads it as it happens. ' +
+  'pastiche: nobody reads this turn as it happens (a /loop, a routine, or a `claude -p` or SDK run). ' +
   'Weave in no vocabulary and run no pastiche writes this turn.'
 
 export const register: Register = on => {
@@ -22,11 +22,11 @@ export const register: Register = on => {
     return next({ ...e, pastiche_deferred: true } as typeof e)
   })
 
-  // The settings hook cannot tell a /loop tick from a typed prompt: on 2.1.293 its
-  // payload carries no `source` for either. `e.origin` can.
+  // The settings hook cannot tell a /loop tick or a `claude -p` prompt from a typed
+  // one: on 2.1.293 its payload carries no `source` for any. `e.origin` can.
   on('prompt.submit', async ($, e, next) => {
     const state = await read($, vocabulary)
-    if (e.origin.kind === 'scheduled-trigger') {
+    if (e.origin.kind === 'scheduled-trigger' || e.origin.kind === 'sdk') {
       return state === 'given' ? next({ ...e, context: [...(e.context ?? []), NO_READER] }) : next(e)
     }
     if (state !== 'owed') return next(e)

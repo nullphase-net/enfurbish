@@ -90,11 +90,12 @@ four times, not a claim about how well you know it now — `seen:` is what drive
 On Claude Code 2.1.287 or later, pastiche also loads a mod, code that runs inside Claude
 Code. It does two things.
 
-It holds the vocabulary back until the first prompt a schedule did not fire. A session
-driven by `/loop` or a routine never carries the terms and never counts as having been
-shown them, so a night of unattended loops does not rotate your due list. In a session you
-started and then left on a loop, each scheduled turn carries one line telling the model that
-nobody is reading and nothing should be written.
+It holds the vocabulary back until the first prompt with a reader. A session driven by
+`/loop` or a routine, or a headless `claude -p` or Agent SDK run, never carries the terms
+and never counts as having been shown them, so a night of unattended loops or a script's
+probes does not rotate your due list. In a session you started and then left on a loop, each
+scheduled turn carries one line telling the model that nobody is reading and nothing should
+be written.
 
 It draws the due terms above the prompt, in the terminal and the desktop app, for the rest
 of the session. Collapse it with ctrl+x ctrl+a. Seeing a term there does not count as

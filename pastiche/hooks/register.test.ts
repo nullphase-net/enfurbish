@@ -7,6 +7,7 @@ const VOCAB = { context: 'VOCAB', terms: ['es: la red — network', 'km: ទឹ�
 
 const typed = { text: 'hi', wait: false, origin: { kind: 'composer' } } as const
 const tick = { text: 'say tick', wait: false, origin: { kind: 'scheduled-trigger' } } as const
+const headless = { text: 'probe', wait: false, origin: { kind: 'sdk' } } as const
 
 const BAND = {
   plugin: 'pastiche',
@@ -71,6 +72,17 @@ test("a schedule's prompt gets no vocabulary, and once the context has it, the n
   await $.prompt.submit(typed)
   await $.prompt.submit(tick)
   expect(contexts).toEqual([undefined, ['VOCAB'], [NO_READER]])
+})
+
+test("a claude -p or SDK prompt gets no vocabulary and counts nothing, and once the context has it, the no-reader line", async ($, on) => {
+  const { runs, contexts } = engine(on)
+  await $.classic.SessionStart({ source: 'startup' })
+  await $.prompt.submit(headless)
+  await $.prompt.submit(headless)
+  expect(runs.length).toBe(0)
+  await $.prompt.submit(typed)
+  await $.prompt.submit(headless)
+  expect(contexts).toEqual([undefined, undefined, ['VOCAB'], [NO_READER]])
 })
 
 test('a compaction owes the vocabulary to the next typed prompt, not to a tick', async ($, on) => {
