@@ -249,18 +249,22 @@ export function mark(text: string, needle: string, date: string): string {
     .split("\n")
     .map(l => {
       if (!hit.has(l)) return l;
-      if (!SEEN.test(l)) return `${l} | ✓ | seen: ${date}`;
-      const parts = l.split(" | ");
-      const head = parts.slice(0, -1);
-      // The marks slot is the first field after the introduce date that is not
-      // a named `key: value` one, so a `subj:` tag never collects a ✓.
-      let i = 2;
-      while (i < head.length && NAMED.test(head[i])) i++;
-      if (i < head.length) head[i] = `✓${head[i]}`;
-      else head.splice(2, 0, "✓");
-      return [...head, `seen: ${date}`].join(" | ");
+      const m = markLine(l, "✓");
+      return SEEN.test(m) ? m.replace(SEEN, `seen: ${date}`) : `${m} | seen: ${date}`;
     })
     .join("\n");
+}
+
+/** Prepend `sym` to a line's marks field, inserting the field when there is none; `seen:` is untouched. */
+function markLine(l: string, sym: string): string {
+  const parts = l.split(" | ");
+  // The marks slot is the first field after the introduce date that is not
+  // a named `key: value` one (`subj:`, `seen:`), so a tag never collects a mark.
+  let i = 2;
+  while (i < parts.length && NAMED.test(parts[i])) i++;
+  if (i < parts.length) parts[i] = `${sym}${parts[i]}`;
+  else parts.splice(2, 0, sym);
+  return parts.join(" | ");
 }
 
 /**
@@ -793,18 +797,28 @@ export function main(
       // out with it — it is data about the ledger's shape, not noise.
       const hits = sameTerm(text, code, b);
       if (hits.length) {
-        // The subject fills a term no copy is tagged on, and never replaces one:
-        // that is --tag's job, and a batch's one subject is coarser than a term's
-        // own. Until 0.10.1 a repeat dropped it and said nothing (2026-09-30).
-        const had = hits.map(l => SUBJ.exec(l)?.[1].trim()).find(Boolean);
-        const fill = had ? undefined : subj;
-        const after = restampLines(text, hits, date, fill);
+        // A mistake that recurs has not stuck: one more ✗, and the stamp stays, so
+        // the correction stays due. A restamp sent it to the back.
+        if (flag === "--correct") {
+          const hit = new Set(hits);
+          text = text.split("\n").map(l => (hit.has(l) ? markLine(l, "✗") : l)).join("\n");
+          dupes.push(`dupe: ${headOf(b)} ×${hits.length} — ✗ again, seen kept`, `  have: ${markLine(hits[0], "✗").slice(2)}`);
+          continue;
+        }
+        // The subject's new parts join the stored ones and none is dropped, as with
+        // --tag short of --replace. Keeping the stored subject whole lost the sense a
+        // session used: `el eje` kept geometry and dropped dataviz.
+        const stored = [...new Set(hits.flatMap(l => subjectParts(SUBJ.exec(l)?.[1] ?? "")))];
+        const known = new Set(stored.map(p => p.toLowerCase()));
+        const gained = subjectParts(subj ?? "").filter(p => !known.has(p.toLowerCase()));
+        const merged = gained.length ? [...stored, ...gained].join(", ") : undefined;
+        const after = restampLines(text, hits, date, merged);
         const state = restampLines(text, hits, date) === text ? "already" : "restamped";
-        const note = fill ? "; tagged" : subj && had !== subj ? `; kept subj: ${had}` : "";
+        const note = !gained.length ? "" : stored.length ? `; subj +${gained.join(", ")}` : "; tagged";
         dupes.push(
           `dupe: ${headOf(b)} ×${hits.length} — ${state} ${date}${note}`,
           // Whole: the stamp is at the end, and 305 of 668 real lines ran past a 96-char cut.
-          `  have: ${restampLines(hits[0], hits, date, fill).slice(2)}`,
+          `  have: ${restampLines(hits[0], hits, date, merged).slice(2)}`,
         );
         text = after;
         continue;

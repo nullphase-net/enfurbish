@@ -458,14 +458,17 @@ describe("--correct", () => {
     expect(readFileSync(c.ledger, "utf8")).toBe(SEED);
   });
 
-  test("the same correction twice is not duplicated", () => {
-    const c = fixture(SEED);
-    const args = ["--correct", "es", "costa", "cuesta", "o→ue when stressed"];
-    main(args, c);
+  // A mistake that recurs has not stuck, so a repeat must not send it to the back
+  // of the rotation, which a restamp did.
+  test("a repeated correction adds a ✗ and keeps its stamp, and is not duplicated", () => {
+    const c = fixture(SEED + "- es: costa → cuesta — o→ue when stressed | 2026-03-01 | ✓✗ | seen: 2026-03-01\n");
     const out: string[] = [];
-    main(args, c, s => void out.push(s));
-    expect(out.some(l => l.startsWith("dupe: costa → cuesta ×1"))).toBe(true);
-    expect(readFileSync(c.ledger, "utf8").split("\n").filter(Boolean).length).toBe(3);
+    main(["--correct", "es", "costa", "cuesta", "stressed forms only"], c, s => void out.push(s));
+    expect(out[0]).toBe("dupe: costa → cuesta ×1 — ✗ again, seen kept");
+    expect(out[1]).toBe("  have: es: costa → cuesta — o→ue when stressed | 2026-03-01 | ✗✓✗ | seen: 2026-03-01");
+    expect(readFileSync(c.ledger, "utf8")).toBe(
+      SEED + "- es: costa → cuesta — o→ue when stressed | 2026-03-01 | ✗✓✗ | seen: 2026-03-01\n",
+    );
   });
 });
 
@@ -628,23 +631,31 @@ describe("--add with a subject", () => {
       .toBe(`- es: la red — network | 2026-02-01 | subj: networking | seen: ${NOW}\n`);
   });
 
-  // --tag replaces a subject; a batch's one subject is coarser than a term's own.
+  // Keeping the stored subject whole dropped the sense a session used: `el eje`
+  // kept "geometry, hardware" and lost "dataviz, charts".
   // The tag sits on the middle copy, so first-copy-decides and last-copy-decides
-  // both fail.
-  test("a repeat never replaces a subject, and a tag on any copy counts", () => {
+  // both fail; parts compare without case, as --tag's do.
+  test("a repeat adds its subject's new parts and drops none, and a tag on any copy counts", () => {
     const seed =
       "- es: el umbral — threshold | 2026-08-15 | seen: 2026-09-01\n" +
-      "- es: el umbral — limit | 2026-08-16 | subj: math | seen: 2026-09-02\n" +
+      "- es: el umbral — limit | 2026-08-16 | subj: math, rf | seen: 2026-09-02\n" +
       "- es: el umbral — doorway | 2026-08-17 | seen: 2026-09-03\n";
     const c = fixture(seed);
     const out: string[] = [];
-    expect(main(["--add", "es", "el umbral — x", "rf"], c, s => void out.push(s))).toBe(0);
-    expect(out[0]).toBe(`dupe: el umbral ×3 — restamped ${NOW}; kept subj: math`);
-    expect(readFileSync(c.ledger, "utf8")).toBe(seed.replace(/seen: 2026-09-0\d/g, `seen: ${NOW}`));
+    expect(main(["--add", "es", "el umbral — x", "RF, dataviz"], c, s => void out.push(s))).toBe(0);
+    expect(out[0]).toBe(`dupe: el umbral ×3 — restamped ${NOW}; subj +dataviz`);
+    expect(out[1]).toBe(`  have: es: el umbral — threshold | 2026-08-15 | subj: math, rf, dataviz | seen: ${NOW}`);
+    expect(readFileSync(c.ledger, "utf8")).toBe(
+      `- es: el umbral — threshold | 2026-08-15 | subj: math, rf, dataviz | seen: ${NOW}\n` +
+      `- es: el umbral — limit | 2026-08-16 | subj: math, rf, dataviz | seen: ${NOW}\n` +
+      `- es: el umbral — doorway | 2026-08-17 | subj: math, rf, dataviz | seen: ${NOW}\n`,
+    );
 
     const same: string[] = [];
-    main(["--add", "es", "el umbral — x", "math"], fixture(seed), s => void same.push(s));
+    const c2 = fixture(seed);
+    main(["--add", "es", "el umbral — x", "Math"], c2, s => void same.push(s));
     expect(same[0]).toBe(`dupe: el umbral ×3 — restamped ${NOW}`);
+    expect(readFileSync(c2.ledger, "utf8")).toBe(seed.replace(/seen: 2026-09-0\d/g, `seen: ${NOW}`));
   });
 });
 

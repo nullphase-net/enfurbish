@@ -151,8 +151,9 @@ reported as new. A dupe is not refused, it is **restamped**: the session reached
 so it was surfaced, which is what `--seen` records. Every copy moves together and the `×N` says
 how many there are. The refusal it replaced cost three or four round trips per session
 (`--add`, read the existing line, `--seen`) to reach the same write. A subject passed with the
-repeat tags the term if no copy is tagged (`; tagged`), and never replaces one that is
-(`; kept subj: <subject>`); `--tag` is how a subject changes. `exists:` remains for the
+repeat tags an untagged term (`; tagged`) and adds its new parts to a tagged one (`; subj
++dataviz`), never dropping a stored part; `--tag --replace` is how a subject narrows. The
+gloss stays as stored. `exists:` remains for the
 one case with nothing to restamp: the body is in the file, but under a different language or
 inside another term's gloss.
 
@@ -175,8 +176,8 @@ written. Until 0.8.0 the needle was a substring of the whole line: replaying 54 
 restamped 16 lines of *other* terms, moving them out of the due list unused, and a mark on
 `អរគុណ (arkun)` left its `(arkun / awkun)` copy due. A needle may also lead with its language, as every due line does: `--seen "es: la red — network"` resolves to `la red` in Spanish only, so a due line pasted back whole works.
 
-A batch's one subject tags every line it adds, and every repeat it restamps that has no
-subject yet. A line that ends in brackets, `el hilo — thread [concurrency]`, the shape the due
+A batch's one subject tags every line it adds, and adds its new parts to every repeat it
+restamps. A line that ends in brackets, `el hilo — thread [concurrency]`, the shape the due
 list prints, takes that subject instead: one batch subject once tagged a repeat with the
 subject meant for the line after it.
 
@@ -196,7 +197,9 @@ $ bun run lib/pastiche.ts --correct es "costa" "cuesta" "costar is o→ue, stres
 
 The wrong form is kept deliberately: it's the half that predicts the next mistake. A
 correction then rotates like any other entry, and `--mark` on it once you get it right reads
-`✓✗` — wrong once, right since.
+`✓✗` — wrong once, right since. The same correction again adds a `✗` (`✗✓✗`) and leaves its
+`seen:` date alone: a mistake that comes back has not stuck, so it stays due rather than
+rotating to the back.
 
 Three separate arguments rather than one composed string, for the same reason the rest of the
 CLI exists: if the session assembled `<wrong> → <right> — <rule>` itself, the format would
